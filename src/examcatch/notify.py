@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import smtplib
 import sys
 from collections.abc import Callable, Sequence
@@ -17,6 +18,8 @@ from examcatch.models import now
 SUBJECT_PREFIX = "ExamCatch: "
 SEND_TIMEOUT_SECONDS = 30
 CALLMEBOT_URL = "https://api.callmebot.com/whatsapp.php"
+# Part of CallMeBot's response for an accepted message: "Message queued. You will receive it in a few seconds."
+CALLMEBOT_SUCCESS_MARKER = "Message queued"
 
 
 class Channel(Protocol):
@@ -63,7 +66,11 @@ class CallMeBotChannel:
             "apikey": self._config.api_key,
         })
         with urlopen(f"{CALLMEBOT_URL}?{query}", timeout=SEND_TIMEOUT_SECONDS) as response:
-            response.read()
+            body = response.read().decode("utf-8", errors="replace")
+        # CallMeBot answers HTTP 200 for errors too (e.g. an invalid API key); only a queued message is a success.
+        if CALLMEBOT_SUCCESS_MARKER not in body:
+            text = " ".join(re.sub(r"<[^>]+>", " ", body).split()).replace(self._config.api_key, "<apikey>")
+            raise RuntimeError(f"CallMeBot did not queue the message: {text[:200]}")
 
 
 class Notifier:
