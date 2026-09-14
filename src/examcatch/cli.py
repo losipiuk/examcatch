@@ -12,9 +12,24 @@ from examcatch.browser import Session, open_browser
 from examcatch.config import ConfigError, load_config
 from examcatch.console import ConsoleInput
 from examcatch.errors import FatalError
-from examcatch.notify import build_notifier
+from examcatch.notify import Notifier, build_notifier
 from examcatch.ratelimit import RateLimiter
 from examcatch.reservation import DRY_RUN_BLOCKED_ROUTES, ReservationFlow
+
+
+def _test_notifications(notifier: Notifier) -> int:
+    if not notifier.channels:
+        print("No notification channels are configured.", file=sys.stderr)
+        return 1
+    failed = False
+    for channel in notifier.channels:
+        try:
+            channel.send("Test notification", "This is a test message from ExamCatch.")
+            print(f"{channel.name}: sent")
+        except Exception as e:  # report every channel's result
+            print(f"{channel.name}: failed: {e}", file=sys.stderr)
+            failed = True
+    return 1 if failed else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,6 +49,11 @@ def main(argv: list[str] | None = None) -> int:
         help="log in, fill in the reservation form for the nearest slot up to the summary step and stop "
         "without submitting anything",
     )
+    parser.add_argument(
+        "--test-notifications",
+        action="store_true",
+        help="send a test message through every configured notification channel and exit",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -43,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     notifier = build_notifier(config)
+    if args.test_notifications:
+        return _test_notifications(notifier)
     console = ConsoleInput()
     try:
         blocked_routes = DRY_RUN_BLOCKED_ROUTES if args.dry_run else ()

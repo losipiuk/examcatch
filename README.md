@@ -17,6 +17,13 @@ cp config.example.yaml config.yaml   # then edit it
 WhatsApp notifications use [CallMeBot](https://www.callmebot.com/blog/free-api-whatsapp-messages/):
 send the activation message from your phone once to get an API key.
 
+Secrets are referenced from `config.yaml` as `${NAME}`; keep them in `.env` (ignored by git) and `source .env`.
+Check the channels with:
+
+```bash
+uv run examcatch --config config.yaml --test-notifications
+```
+
 ## Usage
 
 ```bash

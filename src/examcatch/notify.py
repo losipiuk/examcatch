@@ -77,6 +77,10 @@ class Notifier:
         self._out = out
         self._clock = clock
 
+    @property
+    def channels(self) -> Sequence[Channel]:
+        return self._channels
+
     def info(self, message: str) -> None:
         """Less important information, shown on the screen only."""
         self._print(message)
