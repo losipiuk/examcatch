@@ -12,7 +12,8 @@ config.yaml
 *.local.yaml
 .env
 
-# Browser profile / session data
+# Browser profile / session data / screenshots
+.examcatch/
 profile/
 browser-profile/
 

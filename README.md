@@ -1,0 +1,45 @@
+# ExamCatch
+
+Watches [info-kierowca.pl](https://info-kierowca.pl) for practical driving exam (category B) slots, reserves the
+earliest acceptable one up to the payment step and notifies you by e-mail and WhatsApp. Payment is left to you.
+After you pay, it keeps watching and tells you about earlier slots.
+
+The full specification (in Polish) is in [specyfikacja.md](specyfikacja.md).
+
+## Setup
+
+```bash
+uv sync
+uv run playwright install chromium
+cp config.example.yaml config.yaml   # then edit it
+```
+
+WhatsApp notifications use [CallMeBot](https://www.callmebot.com/blog/free-api-whatsapp-messages/):
+send the activation message from your phone once to get an API key.
+
+## Usage
+
+```bash
+uv run examcatch --config config.yaml
+```
+
+1. A browser window opens. Log in by scanning the QR code with the mObywatel app.
+2. ExamCatch checks for slots and, when it finds an acceptable one, fills in the reservation form up to the
+   payment step. The slot is held for 30 minutes.
+3. Pay in the browser (or in the service's reservation list), then type `paid` and press Enter in the terminal.
+   Without the confirmation ExamCatch keeps reminding you and, after 30 minutes, starts searching again.
+4. Afterwards it notifies you about every slot earlier than your reservation. Stop it with Ctrl+C.
+
+When the session expires, press Enter in the terminal and scan the QR code again.
+
+## Request limits
+
+The service allows only 10 requests per hour per API endpoint. ExamCatch checks the nearest slot per center every
+7 minutes and fetches full schedules only when they can contain an acceptable slot, always keeping requests in
+reserve for the reservation form.
+
+## Development
+
+```bash
+uv run pytest
+```

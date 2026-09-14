@@ -1,0 +1,47 @@
+# ExamCatch configuration. Copy to config.yaml (ignored by git) and adjust.
+# Any value may reference an environment variable with "${NAME}".
+
+centers:
+  # id: exam center id used by the service API
+  # name: exactly as shown in the reservation form
+  - id: 26
+    name: WORD Warszawa M/E Bemowo
+  - id: 25
+    name: WORD Warszawa M/E Odlewnicza
+
+search:
+  window_days: 14          # look for slots within this many days from now
+  start_time_from: "10:00" # allowed exam start time range (inclusive)
+  start_time_to: "15:00"
+  min_lead_hours: 6        # minimum time from now to the exam start
+
+polling:
+  # The service allows 10 requests per hour per API endpoint.
+  detector_interval_minutes: 7         # nearest-slot check
+  full_check_min_interval_minutes: 15  # repeated full schedule check of an unchanged center
+  reservation_reserve_requests: 2      # full-schedule requests kept for the reservation form
+  detector_reserve_requests: 1
+
+payment:
+  hold_minutes: 30              # how long the service holds an unpaid reservation
+  reminder_interval_minutes: 5
+
+browser:
+  profile_dir: .examcatch/profile
+  screenshots_dir: .examcatch/screenshots
+
+notifications:
+  email:
+    enabled: true
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    starttls: true
+    username: "${EXAMCATCH_SMTP_USERNAME}"
+    password: "${EXAMCATCH_SMTP_PASSWORD}"
+    from: "${EXAMCATCH_SMTP_USERNAME}"
+    to:
+      - you@example.com
+  callmebot:
+    enabled: true
+    phone: "+48123456789"
+    api_key: "${EXAMCATCH_CALLMEBOT_API_KEY}"
