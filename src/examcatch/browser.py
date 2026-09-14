@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import timedelta
+from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, Route, sync_playwright
@@ -26,8 +27,19 @@ PAYMENT_INIT_ROUTE = "**/payments/init/**"
 
 
 @contextmanager
-def open_browser(config: BrowserConfig) -> Iterator[Page]:
+def open_browser(
+    config: BrowserConfig,
+    blocked_routes: Sequence[str] = (),
+    on_blocked: Callable[[str], None] | None = None,
+) -> Iterator[Page]:
+    """Opens a headed browser; requests matching `blocked_routes` (and payment initiation) are aborted."""
     config.profile_dir.mkdir(parents=True, exist_ok=True)
+
+    def block(route: Route) -> None:
+        if on_blocked:
+            on_blocked(route.request.url)
+        route.abort()
+
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
             str(config.profile_dir),
@@ -36,7 +48,8 @@ def open_browser(config: BrowserConfig) -> Iterator[Page]:
             viewport={"width": 1400, "height": 900},
         )
         try:
-            context.route(PAYMENT_INIT_ROUTE, _abort)
+            for pattern in (PAYMENT_INIT_ROUTE, *blocked_routes):
+                context.route(pattern, block)
             # The service blocks a second tab of the application, so everything happens in one page.
             yield context.pages[0] if context.pages else context.new_page()
         finally:
@@ -46,14 +59,16 @@ def open_browser(config: BrowserConfig) -> Iterator[Page]:
                 pass
 
 
-def _abort(route: Route) -> None:
-    route.abort()
+def _first_line(error: Exception) -> str:
+    text = str(error).strip()
+    return text.splitlines()[0] if text else type(error).__name__
 
 
 class Session:
-    def __init__(self, page: Page, notifier: Notifier):
+    def __init__(self, page: Page, notifier: Notifier, screenshots_dir: Path):
         self._page = page
         self._notifier = notifier
+        self._screenshots_dir = screenshots_dir
         self._last_keep_alive = time.monotonic()
         self._pointer_toggle = False
 
@@ -78,6 +93,16 @@ class Session:
         while True:
             try:
                 self._start_qr_login()
+            except PlaywrightError as e:
+                self._screenshot("login-failed")
+                self._notifier.info(
+                    f"Could not open the mObywatel QR login at {self._page.url}: {_first_line(e)}. Retrying."
+                )
+                self._page.wait_for_timeout(PAGE_SETTLE_MS)
+                continue
+            if not self._on_login_page():
+                break
+            try:
                 self._page.wait_for_url(
                     lambda url: url.startswith(BASE_URL) and "/login" not in url,
                     timeout=LOGIN_TIMEOUT.total_seconds() * 1000,
@@ -104,13 +129,24 @@ class Session:
         if not self._on_login_page():
             return
         self._dismiss_cookie_banner()
+        self._notifier.info("Choosing login.gov.pl.")
         page.get_by_text("login.gov.pl").first.click()
         page.wait_for_url("**login.gov.pl/**", timeout=60_000)
+        self._notifier.info("Choosing the mObywatel app.")
         page.get_by_role("button", name=re.compile("Aplikacja mObywatel")).click(no_wait_after=True)
         self._notifier.important(
             "Login required",
             "Scan the QR code shown in the ExamCatch browser window with the mObywatel app.",
         )
+
+    def _screenshot(self, name: str) -> None:
+        try:
+            self._screenshots_dir.mkdir(parents=True, exist_ok=True)
+            path = self._screenshots_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-{name}.png"
+            self._page.screenshot(path=str(path), full_page=True)
+            self._notifier.info(f"Screenshot saved to {path}.")
+        except (OSError, PlaywrightError):
+            pass
 
     def _dismiss_cookie_banner(self) -> None:
         try:

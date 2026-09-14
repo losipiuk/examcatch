@@ -19,7 +19,7 @@ from examcatch.notify import Notifier
 from examcatch.planner import CheckPlanner
 from examcatch.ratelimit import RateLimiter
 from examcatch.reservation import ReservationFlow
-from examcatch.service import ALL_SCHEDULE_PATH, NEAREST_SCHEDULE_PATH
+from examcatch.service import ALL_SCHEDULE_PATH, NEAREST_SCHEDULE_HORIZON, NEAREST_SCHEDULE_PATH
 
 PAID_COMMAND = "paid"
 # The reservation form searches from today + 2 days by default; used if the API rejects earlier start dates.
@@ -52,7 +52,6 @@ class App:
         self._planner = self._new_planner()
         self._profile: Profile | None = None
         self._use_service_default_start = False
-        self._multi_center_full_check = True
 
     def run(self) -> None:
         self._session.ensure_logged_in()
@@ -61,6 +60,53 @@ class App:
             reservation = self._search_until_reserved()
             if self._await_payment(reservation):
                 self._monitor(reservation)
+
+    def dry_run(self) -> None:
+        """Tests the reservation form up to the summary step without reserving anything."""
+        self._session.ensure_logged_in()
+        self._profile = self._with_session(self._load_profile)
+
+        def nearest() -> dict[int, Slot | None]:
+            self._session.ensure_service_page()
+            return self._nearest_slots(self._clock())
+
+        try:
+            slots = sorted(slot for slot in self._with_session(nearest).values() if slot)
+        except (ApiError, PlaywrightError) as e:
+            self._notifier.info(f"Could not read the nearest slots: {e}")
+            slots = []
+        if not slots:
+            self._notifier.info("No nearest slots (the endpoint looks about a month ahead); reading full schedules.")
+            slots = self._any_full_schedule_slots()
+        if not slots:
+            self._notifier.info("No practical exam slots are offered at the configured centers; nothing to test.")
+            return
+        current = self._clock()
+        matching = [slot for slot in slots if self._criteria.matches(slot, current)]
+        slot = (matching or slots)[0]
+        reason = "meets the criteria" if matching else "does not meet the criteria, used only to test the form"
+        self._notifier.info(f"Dry run with {slot.describe()} ({reason}).")
+        try:
+            self._with_session(lambda: self._flow.preview(slot))
+        except ReservationError as e:
+            self._notifier.info(f"Dry run failed: {e}")
+            return
+        self._notifier.info("Dry run finished. Nothing was submitted.")
+
+    def _any_full_schedule_slots(self) -> list[Slot]:
+        """Slots from the first configured center with any, for the dry run."""
+        current = self._clock()
+        for center_id in self._center_ids:
+            try:
+                slots = self._with_session(
+                    lambda: self._api.all_practice_slots(self._require_profile(), center_id, self._start_date(current))
+                )
+            except (ApiError, PlaywrightError) as e:
+                self._notifier.info(f"Could not read the full schedule of center {center_id}: {e}")
+                continue
+            if slots:
+                return slots
+        return []
 
     def _load_profile(self) -> Profile:
         self._session.ensure_service_page()
@@ -172,37 +218,32 @@ class App:
         return sorted(found.values())
 
     def _nearest_slots(self, current: datetime) -> dict[int, Slot | None]:
+        profile = self._require_profile()
         try:
-            return self._api.nearest_practice_slots(self._require_profile(), self._center_ids, self._start_date(current))
+            return self._api.nearest_practice_slots(profile, self._center_ids, self._start_date(current))
         except ApiError as e:
             if e.status != 400 or self._use_service_default_start:
                 raise
+            rejected = e
+        # Maybe the start date is earlier than the service accepts; retry once with the form's default start date.
+        default_start = (current + SERVICE_DEFAULT_START_OFFSET).date()
+        if default_start <= self._criteria.search_start_date(current):
+            raise rejected
+        slots = self._api.nearest_practice_slots(profile, self._center_ids, default_start)
         self._use_service_default_start = True
-        self._notifier.info("The service rejected the early start date; searching from its default start date.")
-        return self._api.nearest_practice_slots(self._require_profile(), self._center_ids, self._start_date(current))
+        self._notifier.info(f"The service rejected an earlier start date ({rejected}); searching from {default_start}.")
+        return slots
 
     def _full_check(self, center_ids: tuple[int, ...], current: datetime) -> list[Slot]:
+        # The full schedule endpoint accepts one center per request.
         reserve = self._config.polling.reservation_reserve
         start_date = self._start_date(current)
-        if self._multi_center_full_check and len(center_ids) > 1:
-            if not self._limiter.can_spend(ALL_SCHEDULE_PATH, current, reserve):
-                return self._postpone_full_check()
-            try:
-                slots = self._api.all_practice_slots(self._require_profile(), center_ids, start_date)
-                self._planner.record_full_check(center_ids, current)
-                return slots
-            except ApiError as e:
-                if e.status != 400:
-                    raise
-                self._multi_center_full_check = False
-                self._notifier.info("Full checks of several centers in one request are rejected; checking one by one.")
-
         slots: list[Slot] = []
         for center_id in center_ids:
             if not self._limiter.can_spend(ALL_SCHEDULE_PATH, current, reserve):
                 self._postpone_full_check()
                 break
-            slots.extend(self._api.all_practice_slots(self._require_profile(), (center_id,), start_date))
+            slots.extend(self._api.all_practice_slots(self._require_profile(), center_id, start_date))
             self._planner.record_full_check((center_id,), current)
         return slots
 
@@ -240,7 +281,7 @@ class App:
         return self._profile
 
     def _new_planner(self) -> CheckPlanner:
-        return CheckPlanner(self._criteria, self._config.polling.full_check_min_interval)
+        return CheckPlanner(self._criteria, self._config.polling.full_check_min_interval, NEAREST_SCHEDULE_HORIZON)
 
 
 def _until(moment: datetime | None) -> str:

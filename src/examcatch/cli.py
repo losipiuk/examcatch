@@ -14,7 +14,7 @@ from examcatch.console import ConsoleInput
 from examcatch.errors import FatalError
 from examcatch.notify import build_notifier
 from examcatch.ratelimit import RateLimiter
-from examcatch.reservation import ReservationFlow
+from examcatch.reservation import DRY_RUN_BLOCKED_ROUTES, ReservationFlow
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,6 +28,12 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("config.yaml"),
         help="path to the YAML configuration file (default: config.yaml)",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="log in, fill in the reservation form for the nearest slot up to the summary step and stop "
+        "without submitting anything",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -39,12 +45,17 @@ def main(argv: list[str] | None = None) -> int:
     notifier = build_notifier(config)
     console = ConsoleInput()
     try:
-        with open_browser(config.browser) as page:
+        blocked_routes = DRY_RUN_BLOCKED_ROUTES if args.dry_run else ()
+        with open_browser(config.browser, blocked_routes, lambda url: notifier.info(f"Blocked request: {url}")) as page:
             limiter = RateLimiter()
             api = ServiceApi(page, limiter)
-            session = Session(page, notifier)
+            session = Session(page, notifier, config.browser.screenshots_dir)
             flow = ReservationFlow(page, api, notifier, config.browser.screenshots_dir)
-            App(config, session, api, limiter, flow, notifier, console).run()
+            app = App(config, session, api, limiter, flow, notifier, console)
+            if args.dry_run:
+                app.dry_run()
+            else:
+                app.run()
     except KeyboardInterrupt:
         notifier.info("Stopped.")
     except FatalError as e:

@@ -4,7 +4,14 @@ from datetime import date, datetime
 
 import pytest
 
-from examcatch.api import ApiError, parse_all_slots, parse_nearest_slots, schedule_request_body
+from examcatch.api import (
+    ApiError,
+    _problem_details,
+    pad_center_ids,
+    parse_all_slots,
+    parse_nearest_slots,
+    schedule_request_body,
+)
 from examcatch.models import WARSAW, Profile
 
 NAMES = {26: "WORD Warszawa M/E Bemowo", 25: "WORD Warszawa M/E Odlewnicza"}
@@ -103,3 +110,28 @@ def test_schedule_request_body():
 def test_schedule_request_body_rejects_unknown_category():
     with pytest.raises(ApiError, match="category"):
         schedule_request_body(Profile(number="123", category="X"), (26,), date(2026, 9, 14))
+
+
+def test_pad_center_ids_to_five_with_unused_fillers():
+    assert pad_center_ids([26, 25]) == [26, 25, 1, 2, 3]
+    assert pad_center_ids([2], exclude=[1, 2, 3]) == [2, 4, 5, 6, 7]
+    assert pad_center_ids([26, 25, 24, 23, 22]) == [26, 25, 24, 23, 22]
+
+
+def test_problem_details_from_list_body():
+    body = [{
+        "id": "b194cfb3",
+        "message": "Validation error",
+        "type": "Validation",
+        "details": [{
+            "message": "Exactly 5 exam centers must be provided when searching for the fastest terms",
+            "code": "PredicateValidator",
+            "field": "OrganizationUnitId",
+        }],
+    }]
+
+    assert _problem_details(body) == (
+        " (Validation error; PredicateValidator OrganizationUnitId "
+        "Exactly 5 exam centers must be provided when searching for the fastest terms)"
+    )
+    assert _problem_details("plain text") == ""

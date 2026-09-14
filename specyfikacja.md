@@ -125,6 +125,11 @@ Wybór spośród terminów spełniających warunki: **najwcześniejszy termin** 
 
 1. **Wykrywacz** — `MultipleCentersExams` dla wszystkich skonfigurowanych ośrodków jednym zapytaniem,
    domyślnie **co 7 min** (≈ 8–9 zapytań/h). Zwraca **najbliższy** termin praktyczny per ośrodek.
+   Endpoint wymaga **dokładnie 5 ośrodków** — lista jest dopełniana innymi ośrodkami (wyniki odrzucane);
+   przy więcej niż 5 skonfigurowanych ośrodkach — jedno zapytanie na każde 5.
+   Endpoint **nie widzi terminów daleko w przyszłości** (14.09 pokazał termin za 29 dni, ale nie termin za 35 dni
+   widoczny w pełnym harmonogramie; przyjęty zasięg: 28 dni). Brak najbliższego terminu oznacza brak terminów
+   w zasięgu — jeśli okno wyszukiwania (2.6) jest dłuższe niż zasięg, wykonywane jest cykliczne pełne sprawdzenie.
 2. **Pełne sprawdzenie** — `OneCenterExam` (wszystkie terminy ośrodka), wykonywane **tylko gdy potrzeba**:
    - najbliższy termin praktyczny w którymś ośrodku **zmienił się** od poprzedniego wykrywacza
      i mieści się w oknie wyszukiwania (2.6), lub
@@ -135,8 +140,8 @@ Wybór spośród terminów spełniających warunki: **najwcześniejszy termin** 
      (w oknie na pewno nic nie ma).
    - Jeśli najbliższy termin z wykrywacza **sam spełnia kryteria** — można przejść od razu do rezerwacji (2.2)
      bez pełnego sprawdzenia.
-3. **Zapytanie o wiele ośrodków w `OneCenterExam`** (`organizationId: [26, 25]`) — do sprawdzenia przy implementacji;
-   jeśli nie działa, pełne sprawdzenie osobno per ośrodek (tylko dla ośrodków, które tego wymagają).
+3. **`OneCenterExam` przyjmuje tylko jeden ośrodek** (`[26, 25]` → 400, zweryfikowane) — pełne sprawdzenie
+   wykonywane osobno per ośrodek (tylko dla ośrodków, które tego wymagają).
 
 #### 2.7.2. Budżet zapytań
 
@@ -360,10 +365,19 @@ na poziomie przeglądarki — żadne nie zostało wywołane. Niczego nie zarezer
 | Data rozpoczęcia | `input#startDate` (datepicker, `DD/MM/RRRR`) | domyślnie dziś + 2 dni |
 | Dni | `mat-expansion-panel.day` z nagłówkiem `DD/MM/RRRR` | rozwijane kliknięciem |
 | Termin | `app-timetable-row-exam` → `mat-checkbox.as-radio` (godzina, liczba wolnych miejsc, cena) | zaznaczenie = wybór terminu |
+| Potwierdzenie terminu | okno dialogowe „Potwierdź wybrany egzamin” (rodzaj egzaminu, kategoria, data i godzina, cena), przyciski „Anuluj” / „Potwierdź i przejdź dalej” | otwiera się **od razu po zaznaczeniu terminu** i blokuje resztę strony (zweryfikowane 14.09 23:21) |
 | Nawigacja | „Poprzedni krok” / „Zapisz i przejdź dalej” | |
 
 W trybie „najbliższe terminy” krok 2 pokazuje karty `app-timetable-exam-card` — po jednym najbliższym terminie
 każdego typu egzaminu na ośrodek.
+
+**Kroki 3–4** (dry run 14.09 23:22): po potwierdzeniu terminu formularz przechodzi przez „Język egzaminu i pojazd OSK”
+(radio „Polski”; dane pojazdu OSK pominięte) do kroku **„Podsumowanie”** — „Podsumowanie wstępnej rezerwacji” z sekcjami
+„Dane PKK” (numer PKK, kategoria), „Szczegóły egzaminu” (WORD, rodzaj egzaminu, kategoria, data i godzina, miejsce,
+dodatkowe informacje, cena) i „Pozostałe informacje” (język egzaminu: Polski, czy pojazd OSK: NIE). Podsumowanie
+**nie ma zgód do zaznaczenia**; przyciski „Poprzedni krok” / „Zapisz i przejdź dalej” (zweryfikowane 14.09 23:24).
+Do tego momentu frontend **nie wywołał** `Reservations/create` ani `Reservations/confirm` (w dry run są blokowane
+i żadne nie zostało zgłoszone) — rezerwacja powstaje dopiero po zatwierdzeniu podsumowania.
 
 #### 6.7.3. API — potwierdzone zapytania i odpowiedzi
 
@@ -373,8 +387,8 @@ Wywołania `fetch` z kontekstu zalogowanej strony działają (200, ~300 ms) — 
 |---|---|---|
 | `GET /bknd/status/api/v1/pkk/get_profiles_for_reservation` | — | lista profili: `pkkNumber`, `categoryName`, `profileType`, `isCoursePassed`, dane osobowe |
 | `GET /bknd/config/api/v1/dict/words` | — | 91 ośrodków: `id`, `name`, `location`, adres, `latitude`, `longitude`, `isActive`, `canReschedule` |
-| `POST /bknd/exam/api/v1/Schedules/user/MultipleCentersExams` | `{startDate: "RRRR-MM-DD", organizationId: [ids], category: 5, profileNumber, profileType: "Pkk"}` | lista per ośrodek `{wordId, wordName, examCollectionForDay: [wpis]}` — tylko **najbliższy** termin każdego typu |
-| `POST /bknd/exam/api/v1/Schedules/user/OneCenterExam` | jak wyżej, **`organizationId` musi być listą** (`[26]`; liczba → 400 `InvalidRequestBody`) | `{startDatePointerForCalendar, examCollectionForDay: [{date, examCollections: [wpis]}]}` — **wszystkie** terminy (~2,5 miesiąca) |
+| `POST /bknd/exam/api/v1/Schedules/user/MultipleCentersExams` | `{startDate: "RRRR-MM-DD", organizationId: [ids], category: 5, profileNumber, profileType: "Pkk"}` — **`organizationId` musi zawierać dokładnie 5 ośrodków** (dowolnych; `[26, 25]` → 400 „Exactly 5 exam centers must be provided when searching for the fastest terms”, `[26, 25, 1, 2, 3]` → 200 — zweryfikowane 14.09 23:25). Aplikacja dopełnia listę innymi ośrodkami i odrzuca ich wyniki | lista per ośrodek `{wordId, wordName, examCollectionForDay: [wpis]}` — tylko **najbliższy** termin każdego typu |
+| `POST /bknd/exam/api/v1/Schedules/user/OneCenterExam` | jak wyżej, **`organizationId` musi być listą z dokładnie jednym ośrodkiem** (`[26]`; liczba → 400 `InvalidRequestBody`; `[26, 25]` → 400 — zweryfikowane 14.09 23:20) | `{startDatePointerForCalendar, examCollectionForDay: [{date, examCollections: [wpis]}]}` — **wszystkie** terminy (~2,5 miesiąca) |
 | `GET /bknd/exam/api/v1/Reservations` | — | lista rezerwacji użytkownika (pola niżej) |
 
 **Wpis terminu** (`examCollections[]`):

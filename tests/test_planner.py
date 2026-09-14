@@ -13,8 +13,20 @@ def slot(day: int, hour: int, minute: int = 0, center_id: int = 26) -> Slot:
     return Slot(start=datetime(2026, 9, day, hour, minute, tzinfo=WARSAW), center_id=center_id, center_name="WORD", places=1)
 
 
-def planner() -> CheckPlanner:
-    return CheckPlanner(CRITERIA, timedelta(minutes=15))
+def planner(criteria: SlotCriteria = CRITERIA) -> CheckPlanner:
+    return CheckPlanner(criteria, timedelta(minutes=15), nearest_horizon=timedelta(days=28))
+
+
+def test_no_nearest_slot_needs_no_full_check_when_window_is_within_horizon():
+    assert planner().decide({26: None}, NOW).full_check_centers == ()
+
+
+def test_no_nearest_slot_triggers_full_check_when_window_exceeds_horizon():
+    subject = planner(SlotCriteria(SearchConfig(window_days=45), [26]))
+
+    assert subject.decide({26: None}, NOW).full_check_centers == (26,)
+    subject.record_full_check((26,), NOW)
+    assert subject.decide({26: None}, NOW + timedelta(minutes=7)).full_check_centers == ()
 
 
 def test_matching_nearest_slot_needs_no_full_check_when_searching():

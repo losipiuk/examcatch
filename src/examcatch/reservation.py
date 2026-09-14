@@ -1,6 +1,7 @@
 """Reserving a slot by clicking through the service's reservation form (specyfikacja.md, 2.2, 6.7.2).
 
-Steps 1-2 were verified on the live service; steps 3-6 follow the frontend code and are best effort.
+Steps 1-4 were verified on the live service with --dry-run; the confirmation and payment steps (5-6) follow the
+frontend code.
 """
 
 from __future__ import annotations
@@ -26,12 +27,21 @@ PKK_PROFILE_TYPE_LABEL = "PKK - Profil kandydata na kierowcę (PKK)"
 SINGLE_CENTER_MODE_LABEL = "Wybierz ośrodek WORD i pokaż wszystkie terminy egzaminów"
 PRACTICAL_EXAM_LABEL = re.compile(r"^\s*Egzamin praktyczny\s*$")
 POLISH_LANGUAGE_LABEL = re.compile(r"^\s*(język\s+)?polski\s*$", re.IGNORECASE)
-# The summary step's submit button label has not been seen yet; tried in order.
-SUMMARY_SUBMIT_LABELS = ("Zatwierdź", "Potwierdź", "Zarezerwuj", NEXT_BUTTON_LABEL)
+# Choosing a slot opens a "Potwierdź wybrany egzamin" dialog with this confirmation button.
+SLOT_CONFIRMATION_LABEL = "Potwierdź i przejdź dalej"
+SLOT_STEP_LABEL = "Termin"
+DIALOG_TIMEOUT_MS = 5000
 ELEMENT_TIMEOUT_MS = 15_000
 STEP_SETTLE_MS = 2000
 CONFIRMATION_TIMEOUT_SECONDS = 120
 UNKNOWN_RESERVATION_ID = "unknown (see the reservation list)"
+# Requests aborted in dry run mode, so that filling in the form can never create or hold a reservation.
+DRY_RUN_BLOCKED_ROUTES = (
+    "**/Reservations/create*",
+    "**/Reservations/confirm/**",
+    "**/Reservations/reschedule*",
+    "**/Reservations/cancel*",
+)
 
 
 class ReservationFlow:
@@ -48,6 +58,7 @@ class ReservationFlow:
         self._notifier = notifier
         self._screenshots_dir = screenshots_dir
         self._clock = clock
+        self._describe_steps = False
 
     def reserve(self, slot: Slot) -> Reservation:
         """Clicks through the form up to the payment step, which holds the slot for the user.
@@ -70,6 +81,28 @@ class ReservationFlow:
         reserved_at = self._clock()
         self._screenshot("payment-step")
         return Reservation(id=self._find_reservation_id(slot), slot=slot, reserved_at=reserved_at)
+
+    def preview(self, slot: Slot) -> None:
+        """Dry run: fills in the form up to the summary step and reports what it shows, without submitting it."""
+        self._describe_steps = True
+        try:
+            self._select_profile_and_center(slot)
+            self._select_slot(slot)
+            self._select_language()
+            if not self._appears(self._page.locator("app-step-summary")):
+                raise ReservationError("the summary step was not reached")
+            self._describe_step("summary")
+            # The page scrolls inside a container, so a full-page screenshot misses the bottom of the summary.
+            self._page.locator("app-step-summary").first.evaluate("element => element.scrollIntoView({block: 'end'})")
+            self._page.wait_for_timeout(500)
+            self._screenshot("dry-run-summary-end")
+            submit_visible = self._page.locator("button:visible").filter(has_text=NEXT_BUTTON_LABEL).count() > 0
+            self._notifier.info(f"[summary] submit button {NEXT_BUTTON_LABEL!r} visible: {submit_visible}")
+        except PlaywrightError as e:
+            raise ReservationError(f"unexpected page state: {e}") from e
+        finally:
+            self._screenshot("dry-run")
+            self._describe_steps = False
 
     def _select_profile_and_center(self, slot: Slot) -> None:
         page = self._page
@@ -116,12 +149,21 @@ class ReservationFlow:
         if not self._appears(time_row):
             raise ReservationError(f"{slot.describe()} is no longer offered")
         time_row.first.locator("mat-checkbox").click()
-        self._click_next()
+        confirm = page.locator("[role=dialog], mat-dialog-container").locator("button").filter(
+            has_text=SLOT_CONFIRMATION_LABEL
+        )
+        if self._appears(confirm, timeout_ms=DIALOG_TIMEOUT_MS):
+            confirm.first.click()
+            page.wait_for_timeout(STEP_SETTLE_MS)
+        if self._active_step_label().endswith(SLOT_STEP_LABEL):
+            self._click_next()
 
     def _select_language(self) -> None:
         page = self._page
         page.wait_for_timeout(STEP_SETTLE_MS)
-        polish = page.locator("mat-radio-button:visible").filter(has_text=POLISH_LANGUAGE_LABEL)
+        if self._describe_steps:
+            self._describe_step("language and OSK vehicle")
+        polish =page.locator("mat-radio-button:visible").filter(has_text=POLISH_LANGUAGE_LABEL)
         if polish.count():
             polish.first.click()
         else:
@@ -141,18 +183,9 @@ class ReservationFlow:
         self._click_next()
 
     def _submit_summary(self) -> None:
-        page = self._page
-        summary = page.locator("app-step-summary")
-        summary.wait_for(state="visible", timeout=ELEMENT_TIMEOUT_MS)
-        for checkbox in summary.locator("mat-checkbox:visible").all():
-            if not checkbox.locator("input").is_checked():
-                checkbox.click()
-        for label in SUMMARY_SUBMIT_LABELS:
-            button = page.locator("button:visible").filter(has_text=label)
-            if button.count():
-                button.first.click()
-                return
-        raise ReservationError("submit button not found on the summary step")
+        # The summary has no consents to tick; it is submitted with the usual "Zapisz i przejdź dalej" button.
+        self._page.locator("app-step-summary").wait_for(state="visible", timeout=ELEMENT_TIMEOUT_MS)
+        self._click_next()
 
     def _wait_for_payment_step(self) -> None:
         """The confirmation step turns the reservation into "PlaceReserved"; the payment step follows."""
@@ -188,6 +221,25 @@ class ReservationFlow:
             return UNKNOWN_RESERVATION_ID
         return str(max(held, key=lambda reservation: reservation.get("reservationDate") or "")["id"])
 
+    def _describe_step(self, name: str) -> None:
+        """Reports labels of the current step's controls (dry run diagnostics, scoped to the form)."""
+        stepper = self._page.locator("mat-stepper, mat-horizontal-stepper, mat-vertical-stepper")
+        scope = stepper.first if stepper.count() else self._page.locator("body")
+
+        def labels(selector: str) -> list[str]:
+            return [text[:80] for element in scope.locator(selector).all() if (text := " ".join(element.inner_text().split()))]
+
+        fields = [
+            " ".join(value for attribute in ("id", "formcontrolname", "aria-label") if (value := element.get_attribute(attribute)))
+            for element in scope.locator(
+                "mtx-select:visible, mat-select:visible, input[type=text]:visible, textarea:visible"
+            ).all()
+        ]
+        self._notifier.info(f"[{name}] radio buttons: {labels('mat-radio-button:visible')}")
+        self._notifier.info(f"[{name}] fields: {fields}")
+        self._notifier.info(f"[{name}] checkboxes: {labels('mat-checkbox:visible')}")
+        self._notifier.info(f"[{name}] buttons: {labels('button:visible')}")
+
     def _click_next(self) -> None:
         # Every step has a button with this label; only the current step's one is visible.
         self._page.locator("button:visible").filter(has_text=NEXT_BUTTON_LABEL).first.click(timeout=ELEMENT_TIMEOUT_MS)
@@ -196,12 +248,17 @@ class ReservationFlow:
     def _visible_options(self) -> Locator:
         return self._page.locator("[role=option]:visible")
 
-    def _appears(self, locator: Locator) -> bool:
+    def _appears(self, locator: Locator, timeout_ms: int = ELEMENT_TIMEOUT_MS) -> bool:
         try:
-            locator.first.wait_for(state="visible", timeout=ELEMENT_TIMEOUT_MS)
+            locator.first.wait_for(state="visible", timeout=timeout_ms)
             return True
         except PlaywrightTimeoutError:
             return False
+
+    def _active_step_label(self) -> str:
+        """Label of the current stepper step, e.g. "2 Termin"."""
+        header = self._page.locator("mat-step-header[aria-selected=true]")
+        return " ".join(header.first.inner_text().split()) if header.count() else ""
 
     def _ensure_logged_in(self) -> None:
         if "/login" in self._page.url:

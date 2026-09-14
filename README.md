@@ -32,6 +32,16 @@ uv run examcatch --config config.yaml
 
 When the session expires, press Enter in the terminal and scan the QR code again.
 
+### Dry run
+
+```bash
+uv run examcatch --config config.yaml --dry-run
+```
+
+Logs in, fills in the reservation form for the nearest offered slot (even one not meeting the criteria) up to the
+summary step, prints the controls it sees, saves a screenshot and stops. Nothing is submitted; requests that could
+create or hold a reservation are blocked in the browser.
+
 ## Request limits
 
 The service allows only 10 requests per hour per API endpoint. ExamCatch checks the nearest slot per center every

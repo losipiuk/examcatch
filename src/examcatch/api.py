@@ -14,6 +14,8 @@ from examcatch.ratelimit import RateLimiter
 from examcatch.service import (
     ALL_SCHEDULE_PATH,
     CATEGORY_CODES,
+    FILLER_CENTER_IDS,
+    NEAREST_SCHEDULE_CENTER_COUNT,
     NEAREST_SCHEDULE_PATH,
     PKK_PROFILES_PATH,
     RESERVATIONS_PATH,
@@ -65,12 +67,23 @@ class ServiceApi:
     def nearest_practice_slots(
         self, profile: Profile, center_ids: Iterable[int], start_date: date
     ) -> dict[int, Slot | None]:
-        """Nearest practical exam slot per center (a cheap request, used to detect changes)."""
-        data = self._request("POST", NEAREST_SCHEDULE_PATH, schedule_request_body(profile, center_ids, start_date))
-        return _parsed(lambda: parse_nearest_slots(data))
+        """Nearest practical exam slot per center (a cheap request, used to detect changes).
 
-    def all_practice_slots(self, profile: Profile, center_ids: Iterable[int], start_date: date) -> list[Slot]:
-        data = self._request("POST", ALL_SCHEDULE_PATH, schedule_request_body(profile, center_ids, start_date))
+        One request per 5 centers: the endpoint needs exactly 5, so each group is padded with other centers.
+        """
+        wanted = list(dict.fromkeys(center_ids))
+        result: dict[int, Slot | None] = {}
+        for offset in range(0, len(wanted), NEAREST_SCHEDULE_CENTER_COUNT):
+            group = wanted[offset:offset + NEAREST_SCHEDULE_CENTER_COUNT]
+            body = schedule_request_body(profile, pad_center_ids(group, exclude=wanted), start_date)
+            data = self._request("POST", NEAREST_SCHEDULE_PATH, body)
+            nearest = _parsed(lambda: parse_nearest_slots(data))
+            result.update({center_id: nearest.get(center_id) for center_id in group})
+        return result
+
+    def all_practice_slots(self, profile: Profile, center_id: int, start_date: date) -> list[Slot]:
+        """All practical exam slots at one center; the endpoint accepts exactly one center."""
+        data = self._request("POST", ALL_SCHEDULE_PATH, schedule_request_body(profile, [center_id], start_date))
         return _parsed(lambda: parse_all_slots(data))
 
     def reservations(self) -> list[dict[str, Any]]:
@@ -89,7 +102,7 @@ class ServiceApi:
             budget.remaining = 0
             raise RateLimitedError(f"{method} {path}: request limit exceeded", budget.reset_at)
         if status >= 400:
-            raise ApiError(f"{method} {path}: HTTP {status}", status, data)
+            raise ApiError(f"{method} {path}: HTTP {status}{_problem_details(data)}", status, data)
         return data
 
 
@@ -106,6 +119,13 @@ def schedule_request_body(profile: Profile, center_ids: Iterable[int], start_dat
         "profileNumber": profile.number,
         "profileType": profile.profile_type,
     }
+
+
+def pad_center_ids(center_ids: list[int], exclude: Iterable[int] = ()) -> list[int]:
+    """Pads up to NEAREST_SCHEDULE_CENTER_COUNT ids with filler centers not in `center_ids` or `exclude`."""
+    taken = set(center_ids) | set(exclude)
+    fillers = [center_id for center_id in FILLER_CENTER_IDS if center_id not in taken]
+    return [*center_ids, *fillers[:NEAREST_SCHEDULE_CENTER_COUNT - len(center_ids)]]
 
 
 def parse_nearest_slots(data: Any) -> dict[int, Slot | None]:
@@ -139,6 +159,21 @@ def _parse_entry(entry: dict[str, Any]) -> Slot | None:
         places=places,
         exam_id=entry.get("practiceId"),
     )
+
+
+def _problem_details(data: Any) -> str:
+    """Error message and details from the service's error response (an object or a list of objects)."""
+    def describe(item: dict[str, Any]) -> str:
+        return " ".join(str(item[key]) for key in ("code", "field", "message") if item.get(key))
+
+    parts: list[str] = []
+    for item in data if isinstance(data, list) else [data]:
+        if not isinstance(item, dict):
+            continue
+        parts.append(describe(item))
+        parts.extend(describe(detail) for detail in item.get("details") or [] if isinstance(detail, dict))
+    parts = [part for part in parts if part]
+    return f" ({'; '.join(parts)})" if parts else ""
 
 
 def _decode(text: str) -> Any:

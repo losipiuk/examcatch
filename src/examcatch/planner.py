@@ -21,9 +21,10 @@ class Decision:
 
 
 class CheckPlanner:
-    def __init__(self, criteria: SlotCriteria, full_check_min_interval: timedelta):
+    def __init__(self, criteria: SlotCriteria, full_check_min_interval: timedelta, nearest_horizon: timedelta):
         self._criteria = criteria
         self._min_interval = full_check_min_interval
+        self._nearest_horizon = nearest_horizon
         self._previous_nearest: dict[int, object] = {}
         self._last_full_check: dict[int, datetime] = {}
 
@@ -39,7 +40,12 @@ class CheckPlanner:
         for center_id, slot in nearest.items():
             previous = self._previous_nearest.get(center_id, _UNSEEN)
             self._previous_nearest[center_id] = slot.start if slot else None
-            if slot is None or not self._criteria.may_precede_matches(slot, now, before):
+            if slot is None:
+                # Nothing within the endpoint's horizon; only a window reaching beyond it can still hold slots.
+                if self._criteria.window_end(now) > now + self._nearest_horizon and self._full_check_due(center_id, now):
+                    full_check.append(center_id)
+                continue
+            if not self._criteria.may_precede_matches(slot, now, before):
                 continue
             if self._criteria.matches(slot, now, before):
                 matches.append(slot)
@@ -47,11 +53,13 @@ class CheckPlanner:
                 if before is None:
                     continue
             changed = previous is _UNSEEN or previous != slot.start
-            last_check = self._last_full_check.get(center_id)
-            due = last_check is None or now - last_check >= self._min_interval
-            if changed or due:
+            if changed or self._full_check_due(center_id, now):
                 full_check.append(center_id)
         return Decision(tuple(sorted(matches)), tuple(full_check))
+
+    def _full_check_due(self, center_id: int, now: datetime) -> bool:
+        last_check = self._last_full_check.get(center_id)
+        return last_check is None or now - last_check >= self._min_interval
 
     def record_full_check(self, center_ids: Iterable[int], now: datetime) -> None:
         for center_id in center_ids:
