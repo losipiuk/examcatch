@@ -16,6 +16,15 @@ config.yaml
 profile/
 browser-profile/
 
+# Research artifacts with personal data / session / third-party code (kept locally only)
+research/private/
+research/out/
+research/shots/
+research/explore/
+research/profile/
+research/net.jsonl
+research/driver.log
+
 # IDE
 .idea/
 .vscode/
