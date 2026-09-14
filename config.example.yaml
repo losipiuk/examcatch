@@ -4,8 +4,8 @@
 centers:
   # id: exam center id used by the service API
   # name: exactly as shown in the reservation form
-  - id: 26
-    name: WORD Warszawa M/E Bemowo
+  # Only the WORD holding your PKK profile accepts reservations; list just that one.
+  # Other Warsaw center: id 26, WORD Warszawa M/E Bemowo.
   - id: 25
     name: WORD Warszawa M/E Odlewnicza
 

@@ -102,9 +102,9 @@ Wybór spośród terminów spełniających warunki: **najwcześniejszy termin** 
 ### 2.5. Ośrodki egzaminacyjne
 
 - Lista ośrodków jest **konfigurowalna** (2.9).
-- Domyślnie / na pierwszym etapie — wyłącznie ośrodki w Warszawie:
-  - **WORD Warszawa M/E Bemowo**
-  - **WORD Warszawa M/E Odlewnicza**
+- Na pierwszym etapie — wyłącznie **WORD Warszawa M/E Odlewnicza** (`organizationId` 25), bo tylko ośrodek, w którym
+  znajduje się PKK, przyjmuje rezerwacje (6.7.6). WORD Warszawa M/E Bemowo (26) został usunięty 14.09 po odrzuceniu
+  rezerwacji testowej.
 - Przyszłe rozszerzenie: ośrodki spoza Warszawy, z uwzględnieniem czasu dojazdu.
 - **Ośrodek niezgodny z PKK** — serwis odrzuca rezerwację w WORD innym niż ten, w którym znajduje się PKK (6.7.6).
   Po takim odrzuceniu aplikacja **pomija ten ośrodek** do końca działania i wysyła ważne powiadomienie (2.10);
@@ -173,7 +173,7 @@ Wybór spośród terminów spełniających warunki: **najwcześniejszy termin** 
 
 | Parametr | Opis | Domyślnie |
 |---|---|---|
-| ośrodki | lista WORD-ów branych pod uwagę (2.5) | Bemowo, Odlewnicza |
+| ośrodki | lista WORD-ów branych pod uwagę (2.5) | Odlewnicza |
 | okno wyszukiwania | liczba dni od teraz (2.6) | 14 |
 | przedział godziny startu | od–do, dopuszczalna godzina rozpoczęcia egzaminu (2.4) | 10:00–15:00 |
 | minimalny czas do startu | minimalny odstęp od teraz do startu egzaminu (2.4) | 6 h |
