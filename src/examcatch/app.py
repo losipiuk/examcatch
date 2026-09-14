@@ -13,7 +13,7 @@ from examcatch.browser import Session
 from examcatch.config import Config
 from examcatch.console import ConsoleInput
 from examcatch.criteria import SlotCriteria
-from examcatch.errors import FatalError, ReservationError
+from examcatch.errors import CenterNotAllowedError, FatalError, ReservationError
 from examcatch.models import Profile, Reservation, Slot, now
 from examcatch.notify import Notifier
 from examcatch.planner import CheckPlanner
@@ -93,6 +93,30 @@ class App:
             return
         self._notifier.info("Dry run finished. Nothing was submitted.")
 
+    def test_reservation(self) -> None:
+        """Reserves the latest offered slot, regardless of the criteria, to test the whole form. Does not pay."""
+        self._session.ensure_logged_in()
+        self._profile = self._with_session(self._load_profile)
+        slots = self._any_full_schedule_slots()
+        if not slots:
+            self._notifier.info("No practical exam slots are offered at the configured centers; nothing to test.")
+            return
+        # The latest slot keeps the 30-minute hold away from dates other candidates are likely to want.
+        slot = slots[-1]
+        self._notifier.info(f"Test reservation of {slot.describe()} (latest offered slot, it will expire unpaid).")
+        try:
+            reservation = self._with_session(lambda: self._flow.reserve(slot))
+        except ReservationError as e:
+            self._notifier.info(f"Test reservation failed: {e}")
+            return
+        expires_at = reservation.reserved_at + self._config.payment.hold
+        self._notifier.important(
+            "Test reservation made",
+            f"{slot.describe()}\n"
+            f"Reservation number: {reservation.id}\n"
+            f"This is a test: do not pay, it expires unpaid at {expires_at:%H:%M}. {reservation.link}",
+        )
+
     def _any_full_schedule_slots(self) -> list[Slot]:
         """Slots from the first configured center with any, for the dry run."""
         current = self._clock()
@@ -130,6 +154,9 @@ class App:
         self._notifier.info(f"Reserving {slot.describe()}.")
         try:
             reservation = self._with_session(lambda: self._flow.reserve(slot))
+        except CenterNotAllowedError as e:
+            self._exclude_center(e.center_id, str(e))
+            return None
         except ReservationError as e:
             self._notifier.info(f"Could not reserve {slot.describe()}: {e}")
             return None
@@ -142,6 +169,17 @@ class App:
             f"After paying, type '{PAID_COMMAND}' and press Enter in the ExamCatch terminal.",
         )
         return reservation
+
+    def _exclude_center(self, center_id: int, reason: str) -> None:
+        """Stops using a center the service does not accept for the user's PKK profile."""
+        self._center_ids = tuple(active for active in self._center_ids if active != center_id)
+        name = self._center_names.get(center_id, str(center_id))
+        self._notifier.important(
+            "Exam center skipped",
+            f"{name} rejected the reservation: {reason}\nExamCatch will not use this center until it is restarted.",
+        )
+        if not self._center_ids:
+            raise FatalError("None of the configured exam centers accepts reservations for your PKK profile.")
 
     def _await_payment(self, reservation: Reservation) -> bool:
         """Reminds about the payment until the user confirms it; returns False when the hold expires."""

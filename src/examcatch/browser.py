@@ -130,8 +130,17 @@ class Session:
             return
         self._dismiss_cookie_banner()
         self._notifier.info("Choosing login.gov.pl.")
-        page.get_by_text("login.gov.pl").first.click()
-        page.wait_for_url("**login.gov.pl/**", timeout=60_000)
+        try:
+            page.get_by_text("login.gov.pl").first.click(no_wait_after=True)
+        except PlaywrightTimeoutError:
+            pass  # the click may already have navigated away; the URL check below decides
+        # A still valid login.gov.pl session logs in right away and returns straight to the service.
+        page.wait_for_url(
+            lambda url: "login.gov.pl" in url or (url.startswith(BASE_URL) and "/login" not in url),
+            timeout=60_000,
+        )
+        if not self._on_login_page():
+            return
         self._notifier.info("Choosing the mObywatel app.")
         page.get_by_role("button", name=re.compile("Aplikacja mObywatel")).click(no_wait_after=True)
         self._notifier.important(

@@ -54,7 +54,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="send a test message through every configured notification channel and exit",
     )
+    parser.add_argument(
+        "--test-reservation",
+        action="store_true",
+        help="really reserve the latest offered slot (ignoring the criteria) up to the payment step, notify and "
+        "exit without paying; the reservation expires unpaid",
+    )
     args = parser.parse_args(argv)
+    if sum((args.dry_run, args.test_notifications, args.test_reservation)) > 1:
+        parser.error("--dry-run, --test-notifications and --test-reservation are mutually exclusive")
 
     try:
         config = load_config(args.config)
@@ -76,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
             app = App(config, session, api, limiter, flow, notifier, console)
             if args.dry_run:
                 app.dry_run()
+            elif args.test_reservation:
+                app.test_reservation()
             else:
                 app.run()
     except KeyboardInterrupt:

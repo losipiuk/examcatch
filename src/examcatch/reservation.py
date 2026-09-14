@@ -17,7 +17,7 @@ from playwright.sync_api import Locator, Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from examcatch.api import ApiError, ServiceApi, SessionExpiredError
-from examcatch.errors import FatalError, ReservationError
+from examcatch.errors import CenterNotAllowedError, FatalError, ReservationError
 from examcatch.models import Reservation, Slot, now
 from examcatch.notify import Notifier
 from examcatch.service import BASE_URL, HELD_RESERVATION_STATUSES
@@ -31,6 +31,10 @@ POLISH_LANGUAGE_LABEL = re.compile(r"^\s*(język\s+)?polski\s*$", re.IGNORECASE)
 SLOT_CONFIRMATION_LABEL = "Potwierdź i przejdź dalej"
 SLOT_STEP_LABEL = "Termin"
 DIALOG_TIMEOUT_MS = 5000
+# Part of the service's error when the PKK profile belongs to a different WORD than the chosen exam center.
+WRONG_CENTER_MESSAGE = "innym niż podany w rezerwacji"
+# Material icon names rendered as text inside alerts.
+ALERT_ICON_WORDS = frozenset({"warning", "error", "info", "check_circle", "close"})
 ELEMENT_TIMEOUT_MS = 15_000
 STEP_SETTLE_MS = 2000
 CONFIRMATION_TIMEOUT_SECONDS = 120
@@ -42,6 +46,16 @@ DRY_RUN_BLOCKED_ROUTES = (
     "**/Reservations/reschedule*",
     "**/Reservations/cancel*",
 )
+
+
+def clean_alert_text(text: str) -> str:
+    """Alert text without the icon names the page renders as words (e.g. "warning ... close")."""
+    words = text.split()
+    while words and words[0] in ALERT_ICON_WORDS:
+        words.pop(0)
+    while words and words[-1] in ALERT_ICON_WORDS:
+        words.pop()
+    return " ".join(words)
 
 
 class ReservationFlow:
@@ -71,7 +85,7 @@ class ReservationFlow:
             self._select_slot(slot)
             self._select_language()
             self._submit_summary()
-            self._wait_for_payment_step()
+            self._wait_for_payment_step(slot)
         except ReservationError:
             self._screenshot("reservation-failed")
             raise
@@ -187,7 +201,7 @@ class ReservationFlow:
         self._page.locator("app-step-summary").wait_for(state="visible", timeout=ELEMENT_TIMEOUT_MS)
         self._click_next()
 
-    def _wait_for_payment_step(self) -> None:
+    def _wait_for_payment_step(self, slot: Slot) -> None:
         """The confirmation step turns the reservation into "PlaceReserved"; the payment step follows."""
         page = self._page
         deadline = time.monotonic() + CONFIRMATION_TIMEOUT_SECONDS
@@ -197,7 +211,10 @@ class ReservationFlow:
                 return
             alert = page.locator("app-general-alert-dialog:visible, mat-snack-bar-container:visible")
             if alert.count():
-                raise ReservationError(alert.first.inner_text().strip() or "the service reported an error")
+                message = clean_alert_text(alert.first.inner_text()) or "the service reported an error"
+                if WRONG_CENTER_MESSAGE in message:
+                    raise CenterNotAllowedError(slot.center_id, message)
+                raise ReservationError(message)
             page.wait_for_timeout(1000)
         raise ReservationError("the payment step was not reached in time")
 

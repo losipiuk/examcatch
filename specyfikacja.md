@@ -106,6 +106,9 @@ Wybór spośród terminów spełniających warunki: **najwcześniejszy termin** 
   - **WORD Warszawa M/E Bemowo**
   - **WORD Warszawa M/E Odlewnicza**
 - Przyszłe rozszerzenie: ośrodki spoza Warszawy, z uwzględnieniem czasu dojazdu.
+- **Ośrodek niezgodny z PKK** — serwis odrzuca rezerwację w WORD innym niż ten, w którym znajduje się PKK (6.7.6).
+  Po takim odrzuceniu aplikacja **pomija ten ośrodek** do końca działania i wysyła ważne powiadomienie (2.10);
+  jeśli nie zostanie żaden ośrodek — kończy działanie z błędem.
 
 ### 2.6. Okno wyszukiwania
 
@@ -420,3 +423,16 @@ Nagłówki na każdej odpowiedzi API terminów: `x-ratelimit-limit: 10`, `x-rate
 - W oknie 14 dni (2.6) nie było w tym momencie żadnego terminu praktycznego — aplikacja będzie głównie
   czekać na zwolnione miejsca.
 - Na koncie widoczne rezerwacje „Anulowana” z powodem „Brak miejsc na wybranym egzaminie”.
+
+#### 6.7.6. Rezerwacja testowa (2026-09-14 23:45)
+
+- Termin testowy: WORD Warszawa M/E Bemowo, 30.11.2026 14:00 (`--test-reservation`).
+- Kroki 1–4 przeszły; po zatwierdzeniu „Podsumowania” serwis pokazał baner:
+  „Rezerwacja nie powiodła się - Profil Kandydata na Kierowcę (PKK) znajduje się w Wojewódzkim Ośrodku Ruchu
+  Drogowego (WORD), innym niż podany w rezerwacji. Skontaktuj się z WORD w celu aktualizacji profilu.”
+- Wniosek: **rezerwacja jest możliwa tylko w WORD, w którym znajduje się PKK** — M/E Bemowo i M/E Odlewnicza
+  są osobnymi ośrodkami (`organizationId` 26 i 25), a dotychczasowe rezerwacje na koncie były w Odlewniczej (25).
+- Weryfikacja na liście rezerwacji: **żadna nowa rezerwacja nie powstała** (nadal 10, wszystkie w Odlewniczej, anulowane).
+- Jedna z wcześniejszych rezerwacji ma powód anulowania „Użytkownik nie kontynuował procesu rezerwacji. Minął
+  maksymalny czas na rozpoczęcie płatności (30 minut)” — potwierdza 30-minutowe trzymanie terminu (2.3).
+- Kroki 5–6 („Potwierdzenie”, „Płatność”) nadal **niezweryfikowane**.

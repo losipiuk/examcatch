@@ -49,6 +49,15 @@ Logs in, fills in the reservation form for the nearest offered slot (even one no
 summary step, prints the controls it sees, saves a screenshot and stops. Nothing is submitted; requests that could
 create or hold a reservation are blocked in the browser.
 
+### Test reservation
+
+```bash
+uv run examcatch --config config.yaml --test-reservation
+```
+
+Really reserves the latest offered slot (ignoring the criteria) up to the payment step, sends the "reserved"
+notification and exits. Do not pay; the reservation expires after 30 minutes.
+
 ## Request limits
 
 The service allows only 10 requests per hour per API endpoint. ExamCatch checks the nearest slot per center every
