@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Local config with secrets
+config.yaml
+*.local.yaml
+.env
+
+# Browser profile / session data
+profile/
+browser-profile/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
