@@ -39,6 +39,9 @@ uv run examcatch --config config.yaml
 
 When the session expires, press Enter in the terminal and scan the QR code again.
 
+Everything printed to the terminal is also appended to `.examcatch/examcatch.log`, including unexpected errors with
+their stack trace (configurable under `logging` in `config.yaml`).
+
 ### Dry run
 
 ```bash

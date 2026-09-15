@@ -75,6 +75,12 @@ class CallMeBotConfig:
 
 
 @dataclass(frozen=True)
+class LoggingConfig:
+    # Every message shown on the screen is also appended to this file; None disables the file.
+    file: Path | None = Path(".examcatch/examcatch.log")
+
+
+@dataclass(frozen=True)
 class Config:
     centers: tuple[Center, ...]
     search: SearchConfig
@@ -83,6 +89,7 @@ class Config:
     browser: BrowserConfig
     email: EmailConfig | None
     callmebot: CallMeBotConfig | None
+    logging: LoggingConfig
 
 
 def load_config(path: Path) -> Config:
@@ -129,6 +136,7 @@ def parse_config(raw: Any) -> Config:
         browser=_parse_browser(_mapping(root.get("browser"), "browser")),
         email=_parse_email(notifications.get("email"), "notifications.email"),
         callmebot=_parse_callmebot(notifications.get("callmebot"), "notifications.callmebot"),
+        logging=_parse_logging(_mapping(root.get("logging"), "logging")),
     )
 
 
@@ -209,6 +217,13 @@ def _parse_browser(data: dict[str, Any]) -> BrowserConfig:
             _as_str(_get(data, "screenshots_dir", "browser", str(defaults.screenshots_dir)), "browser.screenshots_dir")
         ),
     )
+
+
+def _parse_logging(data: dict[str, Any]) -> LoggingConfig:
+    if not _as_bool(_get(data, "enabled", "logging", True), "logging.enabled"):
+        return LoggingConfig(file=None)
+    default_file = str(LoggingConfig().file)
+    return LoggingConfig(file=Path(_as_str(_get(data, "file", "logging", default_file), "logging.file")))
 
 
 def _parse_email(raw: Any, path: str) -> EmailConfig | None:

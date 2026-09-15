@@ -4,9 +4,9 @@ from datetime import datetime
 import pytest
 
 from examcatch import notify
-from examcatch.config import CallMeBotConfig
+from examcatch.config import CallMeBotConfig, parse_config
 from examcatch.models import WARSAW
-from examcatch.notify import CallMeBotChannel, Notifier
+from examcatch.notify import CallMeBotChannel, Notifier, build_notifier
 
 CONFIG = CallMeBotConfig(phone="+48123456789", api_key="secret-key")
 
@@ -78,3 +78,28 @@ def test_failing_channel_does_not_stop_other_channels():
 
     assert recording.sent == [("Exam reserved", "details")]
     assert "Sending broken notification failed: boom" in out.getvalue()
+
+
+def test_messages_go_to_screen_and_log_file():
+    out, log = io.StringIO(), io.StringIO()
+    notifier = Notifier([], out=out, log=log, clock=lambda: datetime(2026, 9, 15, 10, 0, tzinfo=WARSAW))
+
+    notifier.info("Searching for a slot.")
+    notifier.important("Exam reserved", "details")
+
+    expected = "[2026-09-15 10:00:00] Searching for a slot.\n[2026-09-15 10:00:00] *** Exam reserved *** details\n"
+    assert out.getvalue() == expected
+    assert log.getvalue() == expected
+
+
+def test_build_notifier_appends_to_log_file(tmp_path):
+    log_file = tmp_path / "logs" / "examcatch.log"
+    config = parse_config({"centers": [{"id": 25, "name": "WORD"}], "logging": {"file": str(log_file)}})
+
+    for message in ("first run", "second run"):
+        notifier = build_notifier(config)
+        notifier.info(message)
+        notifier.close()
+
+    lines = log_file.read_text(encoding="utf-8").splitlines()
+    assert [line.split("] ", 1)[1] for line in lines] == ["first run", "second run"]

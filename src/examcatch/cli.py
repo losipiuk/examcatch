@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 from examcatch.api import ServiceApi
 from examcatch.app import App
 from examcatch.browser import Session, open_browser
-from examcatch.config import ConfigError, load_config
+from examcatch.config import Config, ConfigError, load_config
 from examcatch.console import ConsoleInput
 from examcatch.errors import FatalError
 from examcatch.notify import Notifier, build_notifier
@@ -19,15 +20,15 @@ from examcatch.reservation import DRY_RUN_BLOCKED_ROUTES, ReservationFlow
 
 def _test_notifications(notifier: Notifier) -> int:
     if not notifier.channels:
-        print("No notification channels are configured.", file=sys.stderr)
+        notifier.info("No notification channels are configured.")
         return 1
     failed = False
     for channel in notifier.channels:
         try:
             channel.send("Test notification", "This is a test message from ExamCatch.")
-            print(f"{channel.name}: sent")
+            notifier.info(f"Test notification via {channel.name}: sent")
         except Exception as e:  # report every channel's result
-            print(f"{channel.name}: failed: {e}", file=sys.stderr)
+            notifier.info(f"Test notification via {channel.name}: failed: {e}")
             failed = True
     return 1 if failed else 0
 
@@ -71,6 +72,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     notifier = build_notifier(config)
+    try:
+        return _run(args, config, notifier)
+    except Exception:
+        # Unexpected errors also go to the log file, so a long unattended run can be investigated afterwards.
+        notifier.info(f"Unexpected error:\n{traceback.format_exc()}")
+        return 1
+    finally:
+        notifier.close()
+
+
+def _run(args: argparse.Namespace, config: Config, notifier: Notifier) -> int:
     if args.test_notifications:
         return _test_notifications(notifier)
     console = ConsoleInput()

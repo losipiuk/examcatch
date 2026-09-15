@@ -79,17 +79,19 @@ class Notifier:
         channels: Sequence[Channel] = (),
         out: TextIO = sys.stdout,
         clock: Callable[[], datetime] = now,
+        log: TextIO | None = None,
     ):
         self._channels = channels
         self._out = out
         self._clock = clock
+        self._log = log
 
     @property
     def channels(self) -> Sequence[Channel]:
         return self._channels
 
     def info(self, message: str) -> None:
-        """Less important information, shown on the screen only."""
+        """Less important information, shown on the screen and written to the log file only."""
         self._print(message)
 
     def important(self, subject: str, message: str) -> None:
@@ -101,8 +103,19 @@ class Notifier:
             except Exception as e:  # a failing channel must not stop the application or the other channels
                 self._print(f"Sending {channel.name} notification failed: {e}")
 
+    def close(self) -> None:
+        if self._log is not None:
+            self._log.close()
+            self._log = None
+
     def _print(self, message: str) -> None:
-        print(f"[{self._clock():%Y-%m-%d %H:%M:%S}] {message}", file=self._out, flush=True)
+        line = f"[{self._clock():%Y-%m-%d %H:%M:%S}] {message}"
+        print(line, file=self._out, flush=True)
+        if self._log is not None:
+            try:
+                print(line, file=self._log, flush=True)
+            except OSError:
+                pass  # a broken log file must not stop the application
 
 
 def build_notifier(config: Config) -> Notifier:
@@ -111,4 +124,11 @@ def build_notifier(config: Config) -> Notifier:
         channels.append(EmailChannel(config.email))
     if config.callmebot:
         channels.append(CallMeBotChannel(config.callmebot))
-    return Notifier(channels)
+    log: TextIO | None = None
+    if config.logging.file is not None:
+        try:
+            config.logging.file.parent.mkdir(parents=True, exist_ok=True)
+            log = config.logging.file.open("a", encoding="utf-8")
+        except OSError as e:
+            print(f"Cannot open the log file {config.logging.file}: {e}. Logging to the screen only.", file=sys.stderr)
+    return Notifier(channels, log=log)

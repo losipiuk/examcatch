@@ -198,6 +198,7 @@ czeka (informacja na ekranie).
 | rezerwa zapytań najbliższych terminów | ile zapytań `MultipleCentersExams` zostawić w oknie (2.7.2) | 1 |
 | sprawdzenia w oknie po utracie terminu | ile sprawdzeń rozłożyć w oknie wygaśnięcia rezerwacji konkurenta (2.7.3) | 3 |
 | zapas po oknie | minuty po górnej granicy okna na dodatkowe sprawdzenie; 0 wyłącza (2.7.3) | 1 min |
+| plik logu | plik, do którego dopisywane są wszystkie komunikaty; można wyłączyć (3) | `.examcatch/examcatch.log` |
 | interwał przypomnień o płatności | co ile przypominać w trakcie 30-min okna (2.3) | 5 min |
 | e-mail | serwer SMTP, port, login, hasło, nadawca, odbiorca (2.10) | — |
 | CallMeBot (WhatsApp) | numer telefonu, klucz API (2.10) | — |
@@ -239,6 +240,9 @@ Niepowodzenie wysyłki jednym kanałem nie może blokować drugiego ani przerywa
   `X-RateLimit-Remaining` i nie schodzi do zera (zapas na przebieg rezerwacji).
 - **Jedna karta aplikacji** — serwis blokuje drugą otwartą kartę w tej samej przeglądarce (6.6);
   aplikacja działa w **jednej karcie**.
+- **Log do pliku** — każdy komunikat aplikacji (także mniej istotny) jest jednocześnie wypisywany na ekran
+  i dopisywany do pliku, domyślnie `.examcatch/examcatch.log` (konfigurowalne, można wyłączyć). Nieoczekiwane błędy
+  trafiają do logu razem ze stosem wywołań. Awaria zapisu do pliku nie przerywa działania aplikacji.
 - **Szybkość rezerwacji** — o terminy konkurują inni użytkownicy i boty, więc przebieg formularza nie może mieć
   stałych opóźnień: po każdym kroku aplikacja czeka tylko na przejście formularza do kolejnego kroku.
   Czas przebiegu formularza jest wypisywany na ekranie.

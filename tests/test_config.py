@@ -36,6 +36,7 @@ def test_defaults(tmp_path):
     assert config.payment.reminder_interval == timedelta(minutes=5)
     assert config.email is None
     assert config.callmebot is None
+    assert config.logging.file == Path(".examcatch/examcatch.log")
 
 
 def test_overrides_and_unquoted_times(tmp_path):
@@ -124,6 +125,20 @@ def test_start_time_range_must_be_ordered(tmp_path):
 def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "missing.yaml")
+
+
+def test_logging_file_and_disabling(tmp_path):
+    config = load_config(write_config(tmp_path, MINIMAL + """
+    logging:
+      file: logs/run.log
+    """))
+    assert config.logging.file == Path("logs/run.log")
+
+    config = load_config(write_config(tmp_path, MINIMAL + """
+    logging:
+      enabled: false
+    """))
+    assert config.logging.file is None
 
 
 def test_removed_polling_keys_are_reported(tmp_path):

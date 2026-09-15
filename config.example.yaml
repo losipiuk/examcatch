@@ -33,6 +33,11 @@ browser:
   profile_dir: .examcatch/profile
   screenshots_dir: .examcatch/screenshots
 
+logging:
+  # Everything printed to the terminal is also appended to this file (ignored by git).
+  enabled: true
+  file: .examcatch/examcatch.log
+
 notifications:
   email:
     enabled: true
