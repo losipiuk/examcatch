@@ -23,10 +23,13 @@ a płatność użytkownik kończy ręcznie.
 - **Zapamiętywanie sesji** — aplikacja próbuje zachować sesję (np. profil przeglądarki / cookies)
   między uruchomieniami (_best effort_). Ze względu na krótki czas życia sesji (6.2) po restarcie zwykle
   potrzebne będzie ponowne logowanie — jest to akceptowalne.
-- **Wygaśnięcie sesji** (przy starcie lub w trakcie działania):
-  1. aplikacja wyświetla informację o wygaśnięciu sesji i wysyła ważne powiadomienie (2.10),
-  2. czeka na **potwierdzenie przez użytkownika**,
-  3. ponownie przechodzi przez flow logowania (QR), po czym wraca do przerwanej czynności.
+- **Wygaśnięcie sesji** (przy starcie lub w trakcie działania) — serwis kończy sesję ok. **godzinę po zalogowaniu**,
+  niezależnie od aktywności (6.2):
+  1. aplikacja wypisuje informację o zakończeniu sesji wraz z powodem zapisanym przez serwis,
+  2. **od razu, bez potwierdzenia**, ponownie przechodzi przez flow logowania — jeśli sesja login.gov.pl jest
+     nadal ważna, logowanie kończy się bez kodu QR,
+  3. jeśli potrzebny jest kod QR — wysyła ważne powiadomienie (2.10) **raz na jedno logowanie** (nie przy każdym
+     odświeżeniu kodu) i czeka na zeskanowanie, po czym wraca do przerwanej czynności.
 
 ### 2.2. Przebieg rezerwacji (automatyczne przeklikanie flow)
 
@@ -307,6 +310,13 @@ Rozpoznanie wykonane bez logowania: headless Chromium (Playwright) + analiza pub
   Przy wykryciu wylogowania aplikacja podaje powód odczytany z `sessionStorage`.
 - 15.09: wylogowanie ok. 14:37–14:40 bez uśpienia komputera (ekran wyłączony 13:55–14:35), przy wcześniejszym
   podtrzymywaniu ruchem kursora — przyczyna niepotwierdzona (prawdopodobnie ostrzeżenie o bezczynności).
+- **Maksymalny czas sesji ~1 h** (15.09, bez uśpienia komputera): logowanie 15:03:03 → sesja zakończona 16:09:10
+  z powodem `realtime_unauthorized (jwt_refresh_401)` — serwer odmówił odnowienia tokenu. Wcześniej: logowanie
+  13:33:59 → wylogowanie ok. 14:39. Wniosek: serwer kończy sesję ok. **60–66 min po zalogowaniu**, niezależnie od
+  aktywności (prawdopodobnie limit 60 min i odmowa kolejnego odświeżenia 15-min tokenu). Podtrzymywanie aktywności
+  tego nie zmienia — konieczne jest ponowne logowanie.
+- **Ponowne logowanie bez QR**: 15:02 logowanie przeszło bez kodu QR (sesja login.gov.pl z 14:44 była nadal ważna).
+  Czas życia sesji login.gov.pl — nieznany.
 
 ### 6.3. Kroki formularza rezerwacji
 

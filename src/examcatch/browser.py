@@ -142,10 +142,14 @@ class Session:
             raise SessionExpiredError("not logged in")
 
     def login(self) -> None:
-        """Starts the mObywatel QR login and waits until the user scans the code."""
+        """Logs in again through a still valid login.gov.pl session, or shows the mObywatel QR code and waits for a scan.
+
+        The user is notified once per login, not for every refreshed QR code.
+        """
+        notified = False
         while True:
             try:
-                self._start_qr_login()
+                qr_shown = self._start_qr_login()
             except PlaywrightError as e:
                 self._screenshot("login-failed")
                 self._notifier.info(
@@ -155,6 +159,12 @@ class Session:
                 continue
             if not self._on_login_page():
                 break
+            if qr_shown and not notified:
+                self._notifier.important(
+                    "Login required",
+                    "Scan the QR code shown in the ExamCatch browser window with the mObywatel app.",
+                )
+                notified = True
             try:
                 self._page.wait_for_url(
                     lambda url: url.startswith(BASE_URL) and "/login" not in url,
@@ -175,12 +185,13 @@ class Session:
             remaining -= step
             self._keep_alive()
 
-    def _start_qr_login(self) -> None:
+    def _start_qr_login(self) -> bool:
+        """Opens the login flow; returns whether the mObywatel QR code is shown (False when already logged in)."""
         page = self._page
         page.goto(f"{BASE_URL}/login", wait_until="load")
         page.wait_for_timeout(PAGE_SETTLE_MS)
         if not self._on_login_page():
-            return
+            return False
         self._dismiss_cookie_banner()
         self._notifier.info("Choosing login.gov.pl.")
         try:
@@ -194,7 +205,7 @@ class Session:
             timeout=60_000,
         )
         if not self._on_login_page():
-            return
+            return False
         if MOBYWATEL_LOGIN_HOST not in page.url:
             self._notifier.info("Choosing the mObywatel app.")
             try:
@@ -203,11 +214,8 @@ class Session:
                 pass  # clicking navigates to the QR page, which may outlast the click; the URL check below decides
             page.wait_for_url(lambda url: MOBYWATEL_LOGIN_HOST in url or _is_logged_in_url(url), timeout=60_000)
             if not self._on_login_page():
-                return
-        self._notifier.important(
-            "Login required",
-            "Scan the QR code shown in the ExamCatch browser window with the mObywatel app.",
-        )
+                return False
+        return True
 
     def _screenshot(self, name: str) -> None:
         try:

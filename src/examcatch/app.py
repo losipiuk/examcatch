@@ -312,15 +312,12 @@ class App:
                 self._relogin()
 
     def _relogin(self) -> None:
+        """Logs in again right away: the service ends sessions about an hour after login regardless of activity.
+
+        A still valid login.gov.pl session logs in without the user; otherwise the user is asked to scan the QR code.
+        """
         reason = self._session.logout_reason()
-        self._notifier.important(
-            "Session expired",
-            (f"The service ended the session: {reason}.\n" if reason else "")
-            + "Press Enter in the ExamCatch terminal, then scan the QR code in the browser window to log in again.",
-        )
-        self._console.drain()
-        while self._console.poll() is None:
-            self._session.wait(timedelta(seconds=1))
+        self._notifier.info("The service ended the session" + (f": {reason}" if reason else "") + ". Logging in again.")
         self._session.login()
 
     def _require_profile(self) -> Profile:

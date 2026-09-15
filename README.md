@@ -37,7 +37,8 @@ uv run examcatch --config config.yaml
    Without the confirmation ExamCatch keeps reminding you and, after 30 minutes, starts searching again.
 4. Afterwards it notifies you about every slot earlier than your reservation. Stop it with Ctrl+C.
 
-When the session expires, press Enter in the terminal and scan the QR code again.
+The service ends sessions about an hour after login. ExamCatch then logs in again by itself; while the login.gov.pl
+session is still valid no QR code is needed, otherwise it notifies you once to scan the QR code.
 
 Everything printed to the terminal is also appended to `.examcatch/examcatch.log`, including unexpected errors with
 their stack trace (configurable under `logging` in `config.yaml`).
