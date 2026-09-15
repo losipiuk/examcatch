@@ -56,17 +56,17 @@ a płatność użytkownik kończy ręcznie.
       - Język egzaminu — zawsze **polski**.
       - Dane pojazdu OSK — opcjonalne, **pomijane**.
    4. **„Podsumowanie”** — aplikacja **zatwierdza** dane.
-   5. **„Potwierdzenie”** — aplikacja czeka na potwierdzenie rezerwacji przez serwis
-      (status „Wstępna rezerwacja” / `PlaceReserved`). Błąd na tym etapie = termin nie został zablokowany
-      (np. ktoś był szybszy) → powrót do wyszukiwania.
-   6. **„Płatność”** — **punkt zatrzymania**. Aplikacja **nie przechodzi do bramki płatności**.
+   5. **„Potwierdzenie”** — **punkt zatrzymania** (ostatni krok przed płatnością). Aplikacja czeka na komunikat
+      „Rezerwacja została potwierdzona” (status „Wstępna rezerwacja” / `PlaceReserved`). Błąd na tym etapie =
+      termin nie został zablokowany (np. ktoś był szybszy) → powrót do wyszukiwania.
+   6. **„Płatność”** — nie otwiera się samoczynnie; aplikacja **nie przechodzi do płatności** (zweryfikowane 15.09, 6.7.6).
 
 Flow nie wymaga podawania żadnych dodatkowych danych osobowych poza wyborem PKK.
 
 ### 2.3. Rezerwacja i przekazanie użytkownikowi
 
-- Dojście do kroku **„Płatność”** (tuż przed płatnością) **bez błędu** oznacza, że termin jest
-  **zarezerwowany na 30 minut** (status „Wstępna rezerwacja”, 6.5).
+- Komunikat **„Rezerwacja została potwierdzona”** w kroku „Potwierdzenie” (ostatni krok przed płatnością) oznacza,
+  że termin jest **zarezerwowany na 30 minut** (status `PlaceReserved`, 6.5; zweryfikowane 15.09, 6.7.6).
 - W tym czasie użytkownik musi ręcznie dokończyć płatność.
 - Rezerwacja jest widoczna w interfejsie serwisu — zamknięcie zakładki nie powoduje jej utraty.
 - Aplikacja przekazuje użytkownikowi (ważne powiadomienie, 2.10):
@@ -435,4 +435,14 @@ Nagłówki na każdej odpowiedzi API terminów: `x-ratelimit-limit: 10`, `x-rate
 - Weryfikacja na liście rezerwacji: **żadna nowa rezerwacja nie powstała** (nadal 10, wszystkie w Odlewniczej, anulowane).
 - Jedna z wcześniejszych rezerwacji ma powód anulowania „Użytkownik nie kontynuował procesu rezerwacji. Minął
   maksymalny czas na rozpoczęcie płatności (30 minut)” — potwierdza 30-minutowe trzymanie terminu (2.3).
-- Kroki 5–6 („Potwierdzenie”, „Płatność”) nadal **niezweryfikowane**.
+
+**Druga rezerwacja testowa (2026-09-15 08:38)** — WORD Warszawa M/E Odlewnicza, 30.10.2026 14:10:
+
+- Kroki 1–5 przeszły. Krok **„Potwierdzenie”** („Potwierdzenie terminu rezerwacji”) pokazał:
+  „Rezerwacja została potwierdzona”, „Poniżej możesz sprawdzić szczegóły swojej rezerwacji, pamiętaj, że masz
+  30 minut na dokonanie płatności”, „Zmiana terminu rezerwacji lub jej anulowanie jest możliwe w ciągu 48 godzin
+  przed terminem egzaminu” oraz szczegóły rezerwacji.
+- Lista rezerwacji (API): nowa rezerwacja ze statusem **`PlaceReserved`**, bez płatności.
+- Krok **„Płatność”** nie otwiera się sam — punktem zatrzymania aplikacji jest krok „Potwierdzenie” (2.2).
+- Logowanie: login.gov.pl pamięta wybraną metodę i od razu przekierowuje na `login.mobywatel.gov.pl` (kod QR),
+  bez wyboru „Aplikacja mObywatel” (2.1).

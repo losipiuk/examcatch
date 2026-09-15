@@ -19,6 +19,8 @@ from examcatch.notify import Notifier
 from examcatch.service import BASE_URL
 
 LOGIN_TIMEOUT = timedelta(minutes=10)
+# Host of the page showing the mObywatel QR code.
+MOBYWATEL_LOGIN_HOST = "login.mobywatel.gov.pl"
 PAGE_SETTLE_MS = 3000
 # The frontend logs out after 10 minutes without user activity.
 KEEP_ALIVE_INTERVAL_SECONDS = 60
@@ -57,6 +59,10 @@ def open_browser(
                 context.close()
             except PlaywrightError:
                 pass
+
+
+def _is_logged_in_url(url: str) -> bool:
+    return url.startswith(BASE_URL) and "/login" not in url
 
 
 def _first_line(error: Exception) -> str:
@@ -134,15 +140,23 @@ class Session:
             page.get_by_text("login.gov.pl").first.click(no_wait_after=True)
         except PlaywrightTimeoutError:
             pass  # the click may already have navigated away; the URL check below decides
-        # A still valid login.gov.pl session logs in right away and returns straight to the service.
+        # login.gov.pl may return straight to the service (its session is still valid) or open the mObywatel QR page
+        # right away (it remembers the last login method).
         page.wait_for_url(
-            lambda url: "login.gov.pl" in url or (url.startswith(BASE_URL) and "/login" not in url),
+            lambda url: "login.gov.pl" in url or MOBYWATEL_LOGIN_HOST in url or _is_logged_in_url(url),
             timeout=60_000,
         )
         if not self._on_login_page():
             return
-        self._notifier.info("Choosing the mObywatel app.")
-        page.get_by_role("button", name=re.compile("Aplikacja mObywatel")).click(no_wait_after=True)
+        if MOBYWATEL_LOGIN_HOST not in page.url:
+            self._notifier.info("Choosing the mObywatel app.")
+            try:
+                page.get_by_role("button", name=re.compile("Aplikacja mObywatel")).click(no_wait_after=True)
+            except PlaywrightTimeoutError:
+                pass  # clicking navigates to the QR page, which may outlast the click; the URL check below decides
+            page.wait_for_url(lambda url: MOBYWATEL_LOGIN_HOST in url or _is_logged_in_url(url), timeout=60_000)
+            if not self._on_login_page():
+                return
         self._notifier.important(
             "Login required",
             "Scan the QR code shown in the ExamCatch browser window with the mObywatel app.",

@@ -1,7 +1,7 @@
 """Reserving a slot by clicking through the service's reservation form (specyfikacja.md, 2.2, 6.7.2).
 
-Steps 1-4 were verified on the live service with --dry-run; the confirmation and payment steps (5-6) follow the
-frontend code.
+Steps 1-5 were verified on the live service (--dry-run and --test-reservation). The flow stops at the confirmation
+step, which holds the slot; the payment step (6) is left to the user.
 """
 
 from __future__ import annotations
@@ -31,6 +31,8 @@ POLISH_LANGUAGE_LABEL = re.compile(r"^\s*(język\s+)?polski\s*$", re.IGNORECASE)
 SLOT_CONFIRMATION_LABEL = "Potwierdź i przejdź dalej"
 SLOT_STEP_LABEL = "Termin"
 DIALOG_TIMEOUT_MS = 5000
+# Shown on the confirmation step once the slot is held for the user.
+CONFIRMED_MESSAGE = "Rezerwacja została potwierdzona"
 # Part of the service's error when the PKK profile belongs to a different WORD than the chosen exam center.
 WRONG_CENTER_MESSAGE = "innym niż podany w rezerwacji"
 # Material icon names rendered as text inside alerts.
@@ -85,7 +87,7 @@ class ReservationFlow:
             self._select_slot(slot)
             self._select_language()
             self._submit_summary()
-            self._wait_for_payment_step(slot)
+            self._wait_for_confirmation(slot)
         except ReservationError:
             self._screenshot("reservation-failed")
             raise
@@ -93,7 +95,7 @@ class ReservationFlow:
             self._screenshot("reservation-failed")
             raise ReservationError(f"unexpected page state: {e}") from e
         reserved_at = self._clock()
-        self._screenshot("payment-step")
+        self._screenshot("reservation-confirmed")
         return Reservation(id=self._find_reservation_id(slot), slot=slot, reserved_at=reserved_at)
 
     def preview(self, slot: Slot) -> None:
@@ -201,13 +203,16 @@ class ReservationFlow:
         self._page.locator("app-step-summary").wait_for(state="visible", timeout=ELEMENT_TIMEOUT_MS)
         self._click_next()
 
-    def _wait_for_payment_step(self, slot: Slot) -> None:
-        """The confirmation step turns the reservation into "PlaceReserved"; the payment step follows."""
+    def _wait_for_confirmation(self, slot: Slot) -> None:
+        """Waits for "Rezerwacja została potwierdzona"; the slot is then held ("PlaceReserved") for 30 minutes.
+
+        The payment step only opens when the user asks for it, so the flow stops here.
+        """
         page = self._page
         deadline = time.monotonic() + CONFIRMATION_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             self._ensure_logged_in()
-            if page.locator("app-step-payment").first.is_visible():
+            if page.get_by_text(CONFIRMED_MESSAGE).first.is_visible() or page.locator("app-step-payment").first.is_visible():
                 return
             alert = page.locator("app-general-alert-dialog:visible, mat-snack-bar-container:visible")
             if alert.count():
@@ -216,7 +221,7 @@ class ReservationFlow:
                     raise CenterNotAllowedError(slot.center_id, message)
                 raise ReservationError(message)
             page.wait_for_timeout(1000)
-        raise ReservationError("the payment step was not reached in time")
+        raise ReservationError("the reservation was not confirmed in time")
 
     def _find_reservation_id(self, slot: Slot) -> str:
         # The slot is already held at this point, so failing to find its number must not fail the reservation.
