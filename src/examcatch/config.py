@@ -75,6 +75,12 @@ class CallMeBotConfig:
 
 
 @dataclass(frozen=True)
+class SessionConfig:
+    # Renew the portal session this long after login, before the service ends it (about 60 minutes); None disables it.
+    renew_after: timedelta | None = timedelta(minutes=50)
+
+
+@dataclass(frozen=True)
 class SystemConfig:
     # Keep the computer from idle sleep while running (macOS caffeinate); sleep stops checks and ends the session.
     prevent_sleep: bool = True
@@ -97,6 +103,7 @@ class Config:
     callmebot: CallMeBotConfig | None
     logging: LoggingConfig
     system: SystemConfig
+    session: SessionConfig
 
 
 def load_config(path: Path) -> Config:
@@ -150,6 +157,7 @@ def parse_config(raw: Any) -> Config:
                 "system.prevent_sleep",
             ),
         ),
+        session=_parse_session(_mapping(root.get("session"), "session")),
     )
 
 
@@ -230,6 +238,12 @@ def _parse_browser(data: dict[str, Any]) -> BrowserConfig:
             _as_str(_get(data, "screenshots_dir", "browser", str(defaults.screenshots_dir)), "browser.screenshots_dir")
         ),
     )
+
+
+def _parse_session(data: dict[str, Any]) -> SessionConfig:
+    default_minutes = int(SessionConfig().renew_after.total_seconds() // 60)
+    minutes = _as_int(_get(data, "renew_after_minutes", "session", default_minutes), "session.renew_after_minutes")
+    return SessionConfig(renew_after=timedelta(minutes=minutes) if minutes > 0 else None)
 
 
 def _parse_logging(data: dict[str, Any]) -> LoggingConfig:

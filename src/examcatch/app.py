@@ -241,6 +241,8 @@ class App:
         return []
 
     def _check_once(self, before: datetime | None) -> list[Slot]:
+        # Renewal happens only between checks, never while a reservation waits for payment in the browser.
+        self._session.renew_if_due()
         self._session.ensure_service_page()
         current = self._clock()
         polling = self._config.polling

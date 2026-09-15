@@ -98,7 +98,7 @@ def _run(args: argparse.Namespace, config: Config, notifier: Notifier) -> int:
         with open_browser(config.browser, blocked_routes, lambda url: notifier.info(f"Blocked request: {url}")) as page:
             limiter = RateLimiter()
             api = ServiceApi(page, limiter)
-            session = Session(page, notifier, config.browser.screenshots_dir)
+            session = Session(page, notifier, config.browser.screenshots_dir, config.session.renew_after)
             flow = ReservationFlow(page, api, notifier, config.browser.screenshots_dir)
             app = App(config, session, api, limiter, flow, notifier, console)
             if args.dry_run:

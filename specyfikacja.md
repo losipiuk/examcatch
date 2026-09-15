@@ -30,6 +30,11 @@ a płatność użytkownik kończy ręcznie.
      nadal ważna, logowanie kończy się bez kodu QR,
   3. jeśli potrzebny jest kod QR — wysyła ważne powiadomienie (2.10) **raz na jedno logowanie** (nie przy każdym
      odświeżeniu kodu) i czeka na zeskanowanie, po czym wraca do przerwanej czynności.
+- **Odnawianie sesji z wyprzedzeniem** (eksperyment, 15.09) — domyślnie **50 min po zalogowaniu** (konfigurowalne,
+  0 wyłącza) aplikacja przed kolejnym sprawdzeniem opuszcza portal, usuwa **tylko** ciasteczka sesji portalu
+  (`__Secure-PUDOJT`, `__Secure-PUDOJTMD`), **bez wylogowania**, i loguje się ponownie. Hipoteza: jeśli sesja
+  login.gov.pl jest nadal ważna, logowanie przejdzie bez kodu QR i godzinny limit zacznie się od nowa; w logu
+  zapisywane jest, czy QR był potrzebny. Odnowienie nie jest wykonywane w trakcie oczekiwania na płatność.
 
 ### 2.2. Przebieg rezerwacji (automatyczne przeklikanie flow)
 
@@ -204,6 +209,7 @@ czeka (informacja na ekranie).
 | zapas po oknie | minuty po górnej granicy okna na dodatkowe sprawdzenie; 0 wyłącza (2.7.3) | 1 min |
 | plik logu | plik, do którego dopisywane są wszystkie komunikaty; można wyłączyć (3) | `.examcatch/examcatch.log` |
 | blokada usypiania | czy blokować usypianie komputera z bezczynności podczas działania (3) | włączona |
+| odnawianie sesji | po ilu minutach od zalogowania odnowić sesję portalu; 0 wyłącza (2.1) | 50 min |
 | interwał przypomnień o płatności | co ile przypominać w trakcie 30-min okna (2.3) | 5 min |
 | e-mail | serwer SMTP, port, login, hasło, nadawca, odbiorca (2.10) | — |
 | CallMeBot (WhatsApp) | numer telefonu, klucz API (2.10) | — |

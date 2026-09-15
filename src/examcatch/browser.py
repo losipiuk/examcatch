@@ -31,6 +31,8 @@ KEEP_ALIVE_INTERVAL_SECONDS = 60
 ACTIVITY_SCRIPT = "() => window.dispatchEvent(new MouseEvent('mousemove'))"
 # During the last 2 minutes the frontend ignores activity and shows this dialog; its button extends the session.
 SESSION_WARNING_BUTTON = "app-session-timeout-warning-dialog .session-timeout-warning__actions button"
+# Cookies holding the portal session; clearing them (without logging out) starts a fresh login.
+PORTAL_SESSION_COOKIES = ("__Secure-PUDOJT", "__Secure-PUDOJTMD")
 # Where the frontend records why it ended the session (the reason is removed once the login page shows it).
 LOGOUT_REASON_KEY = "pudo.session.end.reason"
 LOGOUT_EVENTS_KEY = "pudo.session.end.events"
@@ -120,12 +122,19 @@ def _first_line(error: Exception) -> str:
     return text.splitlines()[0] if text else type(error).__name__
 
 
+def renewal_due(logged_in_at: float | None, now: float, renew_after: timedelta | None) -> bool:
+    """Whether a session that started at `logged_in_at` (monotonic seconds) should be renewed at `now`."""
+    return renew_after is not None and logged_in_at is not None and now - logged_in_at >= renew_after.total_seconds()
+
+
 class Session:
-    def __init__(self, page: Page, notifier: Notifier, screenshots_dir: Path):
+    def __init__(self, page: Page, notifier: Notifier, screenshots_dir: Path, renew_after: timedelta | None = None):
         self._page = page
         self._notifier = notifier
         self._screenshots_dir = screenshots_dir
+        self._renew_after = renew_after
         self._last_keep_alive = time.monotonic()
+        self._logged_in_at: float | None = None
 
     def ensure_logged_in(self) -> None:
         """Opens the service and logs in when the stored session is not valid."""
@@ -133,6 +142,28 @@ class Session:
         self._page.wait_for_timeout(PAGE_SETTLE_MS)
         if self._on_login_page():
             self.login()
+        elif self._logged_in_at is None:
+            # A session kept in the browser profile; its real login time is unknown, so count from now.
+            self._logged_in_at = time.monotonic()
+
+    def renew_if_due(self) -> None:
+        """Renews the session before the service ends it, about an hour after login (specyfikacja.md, 2.1).
+
+        Only the portal's session cookies are cleared, without logging out, so a still valid login.gov.pl session can
+        log in again without a QR code. Otherwise the usual QR login runs.
+        """
+        now = time.monotonic()
+        if not renewal_due(self._logged_in_at, now, self._renew_after):
+            return
+        assert self._logged_in_at is not None
+        minutes = int((now - self._logged_in_at) // 60)
+        self._notifier.info(f"Renewing the session before the service ends it (logged in {minutes} min ago).")
+        # Leave the portal first, so its frontend does not react to the missing cookies.
+        self._page.goto("about:blank")
+        for name in PORTAL_SESSION_COOKIES:
+            self._page.context.clear_cookies(name=name)
+        qr_needed = self.login()
+        self._notifier.info("Session renewed " + ("after a QR code scan." if qr_needed else "without a QR code."))
 
     def ensure_service_page(self) -> None:
         """Makes sure the page is on the service origin, which API calls need; raises when logged out."""
@@ -143,10 +174,10 @@ class Session:
         if self._on_login_page():
             raise SessionExpiredError("not logged in")
 
-    def login(self) -> None:
+    def login(self) -> bool:
         """Logs in again through a still valid login.gov.pl session, or shows the mObywatel QR code and waits for a scan.
 
-        The user is notified once per login, not for every refreshed QR code.
+        The user is notified once per login, not for every refreshed QR code. Returns whether a QR code was needed.
         """
         notified = False
         while True:
@@ -176,7 +207,9 @@ class Session:
             except PlaywrightTimeoutError:
                 self._notifier.info("Login was not completed in time; showing a new QR code.")
         self._page.wait_for_timeout(PAGE_SETTLE_MS)
-        self._notifier.info("Logged in.")
+        self._logged_in_at = time.monotonic()
+        self._notifier.info("Logged in." if notified else "Logged in (no QR code needed).")
+        return notified
 
     def wait(self, duration: timedelta) -> None:
         """Waits while keeping the browser responsive and the session active."""

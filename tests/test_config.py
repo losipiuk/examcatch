@@ -38,6 +38,7 @@ def test_defaults(tmp_path):
     assert config.callmebot is None
     assert config.logging.file == Path(".examcatch/examcatch.log")
     assert config.system.prevent_sleep is True
+    assert config.session.renew_after == timedelta(minutes=50)
 
 
 def test_overrides_and_unquoted_times(tmp_path):
@@ -126,6 +127,20 @@ def test_start_time_range_must_be_ordered(tmp_path):
 def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "missing.yaml")
+
+
+def test_session_renewal_time_and_disabling(tmp_path):
+    config = load_config(write_config(tmp_path, MINIMAL + """
+    session:
+      renew_after_minutes: 45
+    """))
+    assert config.session.renew_after == timedelta(minutes=45)
+
+    config = load_config(write_config(tmp_path, MINIMAL + """
+    session:
+      renew_after_minutes: 0
+    """))
+    assert config.session.renew_after is None
 
 
 def test_sleep_prevention_can_be_disabled(tmp_path):
