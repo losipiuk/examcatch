@@ -16,6 +16,7 @@ from examcatch.errors import FatalError
 from examcatch.notify import Notifier, build_notifier
 from examcatch.ratelimit import RateLimiter
 from examcatch.reservation import DRY_RUN_BLOCKED_ROUTES, ReservationFlow
+from examcatch.sleep import prevent_sleep
 
 
 def _test_notifications(notifier: Notifier) -> int:
@@ -73,7 +74,8 @@ def main(argv: list[str] | None = None) -> int:
 
     notifier = build_notifier(config)
     try:
-        return _run(args, config, notifier)
+        with prevent_sleep(config.system.prevent_sleep and not args.test_notifications, notifier):
+            return _run(args, config, notifier)
     except Exception:
         # Unexpected errors also go to the log file, so a long unattended run can be investigated afterwards.
         notifier.info(f"Unexpected error:\n{traceback.format_exc()}")

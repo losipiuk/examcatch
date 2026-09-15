@@ -37,6 +37,7 @@ def test_defaults(tmp_path):
     assert config.email is None
     assert config.callmebot is None
     assert config.logging.file == Path(".examcatch/examcatch.log")
+    assert config.system.prevent_sleep is True
 
 
 def test_overrides_and_unquoted_times(tmp_path):
@@ -125,6 +126,15 @@ def test_start_time_range_must_be_ordered(tmp_path):
 def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "missing.yaml")
+
+
+def test_sleep_prevention_can_be_disabled(tmp_path):
+    config = load_config(write_config(tmp_path, MINIMAL + """
+    system:
+      prevent_sleep: false
+    """))
+
+    assert config.system.prevent_sleep is False
 
 
 def test_logging_file_and_disabling(tmp_path):

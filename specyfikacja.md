@@ -200,6 +200,7 @@ czeka (informacja na ekranie).
 | sprawdzenia w oknie po utracie terminu | ile sprawdzeń rozłożyć w oknie wygaśnięcia rezerwacji konkurenta (2.7.3) | 3 |
 | zapas po oknie | minuty po górnej granicy okna na dodatkowe sprawdzenie; 0 wyłącza (2.7.3) | 1 min |
 | plik logu | plik, do którego dopisywane są wszystkie komunikaty; można wyłączyć (3) | `.examcatch/examcatch.log` |
+| blokada usypiania | czy blokować usypianie komputera z bezczynności podczas działania (3) | włączona |
 | interwał przypomnień o płatności | co ile przypominać w trakcie 30-min okna (2.3) | 5 min |
 | e-mail | serwer SMTP, port, login, hasło, nadawca, odbiorca (2.10) | — |
 | CallMeBot (WhatsApp) | numer telefonu, klucz API (2.10) | — |
@@ -241,6 +242,11 @@ Niepowodzenie wysyłki jednym kanałem nie może blokować drugiego ani przerywa
   `X-RateLimit-Remaining` i nie schodzi do zera (zapas na przebieg rezerwacji).
 - **Jedna karta aplikacji** — serwis blokuje drugą otwartą kartę w tej samej przeglądarce (6.6);
   aplikacja działa w **jednej karcie**.
+- **Blokada usypiania** — w uśpieniu komputera nic nie jest sprawdzane, a sesja serwisu wygasa po 10 min
+  bezczynności (zaobserwowane 15.09: „Idle Sleep” o 11:41, wylogowanie po wybudzeniu o 12:16). Na macOS aplikacja
+  na czas działania blokuje usypianie z bezczynności (`caffeinate -i`; ekran może się wyłączać). Konfigurowalne,
+  domyślnie włączone. Gdy blokada jest niedostępna — tylko ostrzeżenie na ekranie. Zamknięcie klapy laptopa
+  nadal może uśpić komputer.
 - **Log do pliku** — każdy komunikat aplikacji (także mniej istotny) jest jednocześnie wypisywany na ekran
   i dopisywany do pliku, domyślnie `.examcatch/examcatch.log` (konfigurowalne, można wyłączyć). Nieoczekiwane błędy
   trafiają do logu razem ze stosem wywołań. Awaria zapisu do pliku nie przerywa działania aplikacji.

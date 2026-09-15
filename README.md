@@ -42,6 +42,10 @@ When the session expires, press Enter in the terminal and scan the QR code again
 Everything printed to the terminal is also appended to `.examcatch/examcatch.log`, including unexpected errors with
 their stack trace (configurable under `logging` in `config.yaml`).
 
+On macOS ExamCatch keeps the computer from idle sleep while it runs (`caffeinate`; the display may still turn off),
+because a sleeping computer checks nothing and the service's session expires. Disable it with
+`system.prevent_sleep: false`. Closing the lid can still put a laptop to sleep.
+
 ### Dry run
 
 ```bash

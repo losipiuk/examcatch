@@ -33,6 +33,11 @@ browser:
   profile_dir: .examcatch/profile
   screenshots_dir: .examcatch/screenshots
 
+system:
+  # Keep the computer from idle sleep while ExamCatch runs (macOS caffeinate; the display may still turn off).
+  # While asleep nothing is checked and the service's session expires.
+  prevent_sleep: true
+
 logging:
   # Everything printed to the terminal is also appended to this file (ignored by git).
   enabled: true

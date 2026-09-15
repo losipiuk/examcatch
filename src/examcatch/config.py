@@ -75,6 +75,12 @@ class CallMeBotConfig:
 
 
 @dataclass(frozen=True)
+class SystemConfig:
+    # Keep the computer from idle sleep while running (macOS caffeinate); sleep stops checks and ends the session.
+    prevent_sleep: bool = True
+
+
+@dataclass(frozen=True)
 class LoggingConfig:
     # Every message shown on the screen is also appended to this file; None disables the file.
     file: Path | None = Path(".examcatch/examcatch.log")
@@ -90,6 +96,7 @@ class Config:
     email: EmailConfig | None
     callmebot: CallMeBotConfig | None
     logging: LoggingConfig
+    system: SystemConfig
 
 
 def load_config(path: Path) -> Config:
@@ -137,6 +144,12 @@ def parse_config(raw: Any) -> Config:
         email=_parse_email(notifications.get("email"), "notifications.email"),
         callmebot=_parse_callmebot(notifications.get("callmebot"), "notifications.callmebot"),
         logging=_parse_logging(_mapping(root.get("logging"), "logging")),
+        system=SystemConfig(
+            prevent_sleep=_as_bool(
+                _get(_mapping(root.get("system"), "system"), "prevent_sleep", "system", SystemConfig().prevent_sleep),
+                "system.prevent_sleep",
+            ),
+        ),
     )
 
 
