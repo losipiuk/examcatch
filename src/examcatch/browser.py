@@ -26,6 +26,13 @@ PAGE_SETTLE_MS = 3000
 KEEP_ALIVE_INTERVAL_SECONDS = 60
 # Safety net: the application must never start a payment.
 PAYMENT_INIT_ROUTE = "**/payments/init/**"
+# Keep timers and rendering running when the user minimizes or covers the window, so the page keeps its session
+# alive and the reservation form can be clicked through.
+BROWSER_ARGS = (
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+)
 
 
 @contextmanager
@@ -46,6 +53,7 @@ def open_browser(
         context = playwright.chromium.launch_persistent_context(
             str(config.profile_dir),
             headless=False,
+            args=list(BROWSER_ARGS),
             locale="pl-PL",
             viewport={"width": 1400, "height": 900},
         )
