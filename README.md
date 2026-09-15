@@ -60,9 +60,12 @@ notification and exits. Do not pay; the reservation expires after 30 minutes.
 
 ## Request limits
 
-The service allows only 10 requests per hour per API endpoint. ExamCatch checks the nearest slot per center every
-7 minutes and fetches full schedules only when they can contain an acceptable slot, always keeping requests in
-reserve for the reservation form.
+The service allows only 10 requests per hour per API endpoint. ExamCatch alternates between the nearest-slot and the
+full schedule endpoints, which have separate limits, checking about every 3.5 minutes. Full schedules are skipped
+when they cannot contain an acceptable slot, and requests are always kept in reserve for the reservation form.
+
+When someone else takes a slot before ExamCatch can reserve it, their reservation is cancelled after 30 minutes if
+they don't pay, so ExamCatch plans extra checks for that moment.
 
 ## Development
 

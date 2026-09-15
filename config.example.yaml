@@ -16,11 +16,11 @@ search:
   min_lead_hours: 6        # minimum time from now to the exam start
 
 polling:
-  # The service allows 10 requests per hour per API endpoint.
-  detector_interval_minutes: 7         # nearest-slot check
-  full_check_min_interval_minutes: 15  # repeated full schedule check of an unchanged center
-  reservation_reserve_requests: 2      # full-schedule requests kept for the reservation form
-  detector_reserve_requests: 1
+  # The service allows 10 requests per hour per API endpoint; checks alternate between its two schedule endpoints.
+  check_interval_seconds: 210            # ~17 checks per hour in total
+  reservation_reserve_requests: 2        # full-schedule requests kept for the reservation form
+  detector_reserve_requests: 1           # nearest-slot requests kept in reserve
+  release_check_delays_minutes: [0, 2, 5]  # extra checks 30 min (+ delay) after losing a slot to someone else
 
 payment:
   hold_minutes: 30              # how long the service holds an unpaid reservation

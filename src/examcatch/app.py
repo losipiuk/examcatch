@@ -16,7 +16,7 @@ from examcatch.criteria import SlotCriteria
 from examcatch.errors import CenterNotAllowedError, FatalError, ReservationError
 from examcatch.models import Profile, Reservation, Slot, now
 from examcatch.notify import Notifier
-from examcatch.planner import CheckPlanner
+from examcatch.planner import CheckScheduler
 from examcatch.ratelimit import RateLimiter
 from examcatch.reservation import ReservationFlow
 from examcatch.service import ALL_SCHEDULE_PATH, NEAREST_SCHEDULE_HORIZON, NEAREST_SCHEDULE_PATH
@@ -49,7 +49,7 @@ class App:
         self._center_ids = tuple(center.id for center in config.centers)
         self._center_names = {center.id: center.name for center in config.centers}
         self._criteria = SlotCriteria(config.search, self._center_ids)
-        self._planner = self._new_planner()
+        self._scheduler = self._new_scheduler()
         self._profile: Profile | None = None
         self._use_service_default_start = False
 
@@ -141,14 +141,14 @@ class App:
         return profiles[0]
 
     def _search_until_reserved(self) -> Reservation:
-        self._planner = self._new_planner()
+        self._scheduler = self._new_scheduler()
         self._notifier.info("Searching for a slot.")
         while True:
             for slot in self._check(before=None):
                 reservation = self._reserve(slot)
                 if reservation is not None:
                     return reservation
-            self._session.wait(self._config.polling.detector_interval)
+            self._wait_for_next_check()
 
     def _reserve(self, slot: Slot) -> Reservation | None:
         self._notifier.info(f"Reserving {slot.describe()}.")
@@ -159,6 +159,13 @@ class App:
             return None
         except ReservationError as e:
             self._notifier.info(f"Could not reserve {slot.describe()}: {e}")
+            planned = self._scheduler.record_lost_slot(slot, self._clock())
+            if planned:
+                hold_minutes = int(self._config.payment.hold.total_seconds() // 60)
+                self._notifier.info(
+                    f"If someone else holds it unpaid, it returns after {hold_minutes} minutes; extra checks at "
+                    + ", ".join(f"{moment:%H:%M}" for moment in planned) + "."
+                )
             return None
         deadline = reservation.reserved_at + self._config.payment.hold
         self._notifier.important(
@@ -210,7 +217,7 @@ class App:
 
     def _monitor(self, reservation: Reservation) -> None:
         """Notifies about every new slot earlier than the reservation; runs until the application is stopped."""
-        self._planner = self._new_planner()
+        self._scheduler = self._new_scheduler()
         notified: set[tuple[int, datetime]] = set()
         while True:
             for slot in self._check(before=reservation.slot.start):
@@ -221,7 +228,7 @@ class App:
                     "Earlier slot available",
                     f"{slot.describe()}\nYour reservation: {reservation.slot.describe()}",
                 )
-            self._session.wait(self._config.polling.detector_interval)
+            self._wait_for_next_check()
 
     def _check(self, before: datetime | None) -> list[Slot]:
         """Acceptable slots found in this cycle, earliest first. Failures are reported and yield no slots."""
@@ -236,24 +243,44 @@ class App:
     def _check_once(self, before: datetime | None) -> list[Slot]:
         self._session.ensure_service_page()
         current = self._clock()
-        if not self._limiter.can_spend(NEAREST_SCHEDULE_PATH, current, self._config.polling.detector_reserve):
-            reset_at = self._limiter.budget(NEAREST_SCHEDULE_PATH).reset_at
-            self._notifier.info(f"Request budget for checks used up{_until(reset_at)}.")
+        polling = self._config.polling
+        check = self._scheduler.choose(
+            current,
+            self._center_ids,
+            can_nearest=self._limiter.can_spend(NEAREST_SCHEDULE_PATH, current, polling.detector_reserve),
+            can_full=self._limiter.can_spend(ALL_SCHEDULE_PATH, current, polling.reservation_reserve),
+            before=before,
+        )
+        if check is None:
+            resets = [
+                reset_at
+                for path in (NEAREST_SCHEDULE_PATH, ALL_SCHEDULE_PATH)
+                if (reset_at := self._limiter.budget(path).reset_at)
+            ]
+            self._notifier.info(f"Request budget used up{_until(min(resets) if resets else None)}.")
             return []
 
-        nearest = self._nearest_slots(current)
-        self._notifier.info("Nearest practical exams: " + "; ".join(
-            f"{self._center_names.get(center_id, center_id)}: {slot.start:%d.%m %H:%M}" if slot
-            else f"{self._center_names.get(center_id, center_id)}: none"
-            for center_id, slot in nearest.items()
-        ))
-        decision = self._planner.decide(nearest, current, before)
-        found = {slot.key: slot for slot in decision.matches}
-        if decision.full_check_centers:
-            for slot in self._full_check(decision.full_check_centers, current):
-                if self._criteria.matches(slot, current, before):
-                    found[slot.key] = slot
-        return sorted(found.values())
+        if check.center_id is None:
+            nearest = self._nearest_slots(current)
+            self._notifier.info("Nearest practical exams: " + "; ".join(
+                f"{self._center_name(center_id)}: {slot.start:%d.%m %H:%M}" if slot
+                else f"{self._center_name(center_id)}: none"
+                for center_id, slot in nearest.items()
+            ))
+            return self._scheduler.record_nearest(nearest, current, before)
+
+        slots = self._api.all_practice_slots(self._require_profile(), check.center_id, self._start_date(current))
+        matches = self._scheduler.record_full(check.center_id, slots, current, before)
+        self._notifier.info(
+            f"Full schedule of {self._center_name(check.center_id)}: "
+            f"{len(slots)} practical slots, {len(matches)} acceptable."
+        )
+        return matches
+
+    def _wait_for_next_check(self) -> None:
+        current = self._clock()
+        wakeup = self._scheduler.next_wakeup(current, self._config.polling.check_interval)
+        self._session.wait(max(wakeup - current, timedelta(seconds=1)))
 
     def _nearest_slots(self, current: datetime) -> dict[int, Slot | None]:
         profile = self._require_profile()
@@ -271,24 +298,6 @@ class App:
         self._use_service_default_start = True
         self._notifier.info(f"The service rejected an earlier start date ({rejected}); searching from {default_start}.")
         return slots
-
-    def _full_check(self, center_ids: tuple[int, ...], current: datetime) -> list[Slot]:
-        # The full schedule endpoint accepts one center per request.
-        reserve = self._config.polling.reservation_reserve
-        start_date = self._start_date(current)
-        slots: list[Slot] = []
-        for center_id in center_ids:
-            if not self._limiter.can_spend(ALL_SCHEDULE_PATH, current, reserve):
-                self._postpone_full_check()
-                break
-            slots.extend(self._api.all_practice_slots(self._require_profile(), center_id, start_date))
-            self._planner.record_full_check((center_id,), current)
-        return slots
-
-    def _postpone_full_check(self) -> list[Slot]:
-        reset_at = self._limiter.budget(ALL_SCHEDULE_PATH).reset_at
-        self._notifier.info(f"Full check postponed to keep requests for a reservation{_until(reset_at)}.")
-        return []
 
     def _start_date(self, current: datetime) -> date:
         start = self._criteria.search_start_date(current)
@@ -318,8 +327,16 @@ class App:
             raise FatalError("PKK profile is not loaded")
         return self._profile
 
-    def _new_planner(self) -> CheckPlanner:
-        return CheckPlanner(self._criteria, self._config.polling.full_check_min_interval, NEAREST_SCHEDULE_HORIZON)
+    def _center_name(self, center_id: int) -> str:
+        return self._center_names.get(center_id, str(center_id))
+
+    def _new_scheduler(self) -> CheckScheduler:
+        return CheckScheduler(
+            self._criteria,
+            NEAREST_SCHEDULE_HORIZON,
+            hold=self._config.payment.hold,
+            release_check_delays=self._config.polling.release_check_delays,
+        )
 
 
 def _until(moment: datetime | None) -> str:

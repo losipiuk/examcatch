@@ -38,7 +38,8 @@ WRONG_CENTER_MESSAGE = "innym niż podany w rezerwacji"
 # Material icon names rendered as text inside alerts.
 ALERT_ICON_WORDS = frozenset({"warning", "error", "info", "check_circle", "close"})
 ELEMENT_TIMEOUT_MS = 15_000
-STEP_SETTLE_MS = 2000
+# Short pause after the stepper moves to the next step, while its content renders.
+STEP_SETTLE_MS = 300
 CONFIRMATION_TIMEOUT_SECONDS = 120
 UNKNOWN_RESERVATION_ID = "unknown (see the reservation list)"
 # Requests aborted in dry run mode, so that filling in the form can never create or hold a reservation.
@@ -82,6 +83,7 @@ class ReservationFlow:
         Raises ReservationError when this slot cannot be reserved, FatalError when the account setup is
         unsupported, and SessionExpiredError when the user got logged out.
         """
+        started = time.monotonic()
         try:
             self._select_profile_and_center(slot)
             self._select_slot(slot)
@@ -95,6 +97,7 @@ class ReservationFlow:
             self._screenshot("reservation-failed")
             raise ReservationError(f"unexpected page state: {e}") from e
         reserved_at = self._clock()
+        self._notifier.info(f"Reservation form completed in {time.monotonic() - started:.1f} s.")
         self._screenshot("reservation-confirmed")
         return Reservation(id=self._find_reservation_id(slot), slot=slot, reserved_at=reserved_at)
 
@@ -164,23 +167,24 @@ class ReservationFlow:
         time_row = day_panel.first.locator("app-timetable-row-exam").filter(has_text=f"{slot.start:%H:%M}")
         if not self._appears(time_row):
             raise ReservationError(f"{slot.describe()} is no longer offered")
+        step = self._active_step_label()
         time_row.first.locator("mat-checkbox").click()
         confirm = page.locator("[role=dialog], mat-dialog-container").locator("button").filter(
             has_text=SLOT_CONFIRMATION_LABEL
         )
         if self._appears(confirm, timeout_ms=DIALOG_TIMEOUT_MS):
             confirm.first.click()
-            page.wait_for_timeout(STEP_SETTLE_MS)
+            self._wait_for_step_change(step)
         if self._active_step_label().endswith(SLOT_STEP_LABEL):
             self._click_next()
 
     def _select_language(self) -> None:
         page = self._page
-        page.wait_for_timeout(STEP_SETTLE_MS)
+        polish = page.locator("mat-radio-button:visible").filter(has_text=POLISH_LANGUAGE_LABEL)
+        has_polish = self._appears(polish, timeout_ms=DIALOG_TIMEOUT_MS)
         if self._describe_steps:
             self._describe_step("language and OSK vehicle")
-        polish =page.locator("mat-radio-button:visible").filter(has_text=POLISH_LANGUAGE_LABEL)
-        if polish.count():
+        if has_polish:
             polish.first.click()
         else:
             for select in page.locator("mtx-select:visible, mat-select:visible").all():
@@ -201,7 +205,8 @@ class ReservationFlow:
     def _submit_summary(self) -> None:
         # The summary has no consents to tick; it is submitted with the usual "Zapisz i przejdź dalej" button.
         self._page.locator("app-step-summary").wait_for(state="visible", timeout=ELEMENT_TIMEOUT_MS)
-        self._click_next()
+        # The confirmation step's progress and errors are watched by _wait_for_confirmation.
+        self._click_next(wait_for_next_step=False)
 
     def _wait_for_confirmation(self, slot: Slot) -> None:
         """Waits for "Rezerwacja została potwierdzona"; the slot is then held ("PlaceReserved") for 30 minutes.
@@ -262,10 +267,22 @@ class ReservationFlow:
         self._notifier.info(f"[{name}] checkboxes: {labels('mat-checkbox:visible')}")
         self._notifier.info(f"[{name}] buttons: {labels('button:visible')}")
 
-    def _click_next(self) -> None:
+    def _click_next(self, wait_for_next_step: bool = True) -> None:
         # Every step has a button with this label; only the current step's one is visible.
+        step = self._active_step_label()
         self._page.locator("button:visible").filter(has_text=NEXT_BUTTON_LABEL).first.click(timeout=ELEMENT_TIMEOUT_MS)
-        self._page.wait_for_timeout(STEP_SETTLE_MS)
+        if wait_for_next_step:
+            self._wait_for_step_change(step)
+
+    def _wait_for_step_change(self, previous_step: str, timeout_ms: int = ELEMENT_TIMEOUT_MS) -> bool:
+        """Waits until the stepper leaves `previous_step`, instead of sleeping for a fixed time."""
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            if self._active_step_label() != previous_step:
+                self._page.wait_for_timeout(STEP_SETTLE_MS)
+                return True
+            self._page.wait_for_timeout(100)
+        return False
 
     def _visible_options(self) -> Locator:
         return self._page.locator("[role=option]:visible")

@@ -36,10 +36,12 @@ class SearchConfig:
 
 @dataclass(frozen=True)
 class PollingConfig:
-    detector_interval: timedelta = timedelta(minutes=7)
-    full_check_min_interval: timedelta = timedelta(minutes=15)
+    # Checks alternate between two endpoints with 10 requests per hour each, minus the reserves below.
+    check_interval: timedelta = timedelta(seconds=210)
     reservation_reserve: int = 2
     detector_reserve: int = 1
+    # Extra checks after a lost slot's competitor hold may expire (hold time + each delay).
+    release_check_delays: tuple[timedelta, ...] = (timedelta(0), timedelta(minutes=2), timedelta(minutes=5))
 
 
 @dataclass(frozen=True)
@@ -157,10 +159,25 @@ def _parse_search(data: dict[str, Any]) -> SearchConfig:
 
 def _parse_polling(data: dict[str, Any]) -> PollingConfig:
     defaults = PollingConfig()
+    for removed in ("detector_interval_minutes", "full_check_min_interval_minutes"):
+        if removed in data:
+            raise ConfigError(f"polling.{removed}: no longer supported, use polling.check_interval_seconds")
+    delays = _get(
+        data,
+        "release_check_delays_minutes",
+        "polling",
+        [int(delay.total_seconds() // 60) for delay in defaults.release_check_delays],
+    )
+    if not isinstance(delays, list):
+        raise ConfigError("polling.release_check_delays_minutes: must be a list of minutes")
     return PollingConfig(
-        detector_interval=_minutes(data, "detector_interval_minutes", "polling", defaults.detector_interval, minimum=1),
-        full_check_min_interval=_minutes(
-            data, "full_check_min_interval_minutes", "polling", defaults.full_check_min_interval, minimum=1
+        check_interval=timedelta(seconds=_as_int(
+            _get(data, "check_interval_seconds", "polling", int(defaults.check_interval.total_seconds())),
+            "polling.check_interval_seconds",
+            minimum=30,
+        )),
+        release_check_delays=tuple(
+            timedelta(minutes=_as_int(delay, "polling.release_check_delays_minutes")) for delay in delays
         ),
         reservation_reserve=_as_int(
             _get(data, "reservation_reserve_requests", "polling", defaults.reservation_reserve),

@@ -124,36 +124,47 @@ Wybór spośród terminów spełniających warunki: **najwcześniejszy termin** 
 - Serwis pozwala na **10 zapytań na godzinę na endpoint** (6.7.4) — sprawdzanie co minutę jest niemożliwe.
   Strategia wykorzystuje to, że dwa endpointy mają **osobne limity**.
 
-#### 2.7.1. Strategia dwustopniowa (dotyczy też monitoringu 2.8)
+#### 2.7.1. Naprzemienne sprawdzanie dwoma endpointami (dotyczy też monitoringu 2.8)
 
-1. **Wykrywacz** — `MultipleCentersExams` dla wszystkich skonfigurowanych ośrodków jednym zapytaniem,
-   domyślnie **co 7 min** (≈ 8–9 zapytań/h). Zwraca **najbliższy** termin praktyczny per ośrodek.
-   Endpoint wymaga **dokładnie 5 ośrodków** — lista jest dopełniana innymi ośrodkami (wyniki odrzucane);
-   przy więcej niż 5 skonfigurowanych ośrodkach — jedno zapytanie na każde 5.
-   Endpoint **nie widzi terminów daleko w przyszłości** (14.09 pokazał termin za 29 dni, ale nie termin za 35 dni
-   widoczny w pełnym harmonogramie; przyjęty zasięg: 28 dni). Brak najbliższego terminu oznacza brak terminów
-   w zasięgu — jeśli okno wyszukiwania (2.6) jest dłuższe niż zasięg, wykonywane jest cykliczne pełne sprawdzenie.
-2. **Pełne sprawdzenie** — `OneCenterExam` (wszystkie terminy ośrodka), wykonywane **tylko gdy potrzeba**:
-   - najbliższy termin praktyczny w którymś ośrodku **zmienił się** od poprzedniego wykrywacza
-     i mieści się w oknie wyszukiwania (2.6), lub
-   - najbliższy termin mieści się w oknie, ale nie spełnia pozostałych kryteriów (np. godzina spoza 10–15),
-     więc w tym samym oknie mogą pojawić się inne terminy — wtedy pełne sprawdzenie **cyklicznie**,
-     domyślnie nie częściej niż **co 15 min**.
-   - Jeśli najbliższy termin jest **poza oknem** wyszukiwania — pełne sprawdzenie nie jest potrzebne
-     (w oknie na pewno nic nie ma).
-   - Jeśli najbliższy termin z wykrywacza **sam spełnia kryteria** — można przejść od razu do rezerwacji (2.2)
-     bez pełnego sprawdzenia.
-3. **`OneCenterExam` przyjmuje tylko jeden ośrodek** (`[26, 25]` → 400, zweryfikowane) — pełne sprawdzenie
-   wykonywane osobno per ośrodek (tylko dla ośrodków, które tego wymagają).
+Sprawdzenie wykonywane jest domyślnie **co 210 s** (≈ 17 zapytań/h), **na zmianę** jednym z dwóch endpointów,
+które mają **osobne limity** (po 10 zapytań/h, minus rezerwy z 2.7.2):
+
+1. **Najbliższe terminy** — `MultipleCentersExams` dla wszystkich skonfigurowanych ośrodków jednym zapytaniem.
+   Zwraca **najbliższy** termin praktyczny per ośrodek.
+   - Endpoint wymaga **dokładnie 5 ośrodków** — lista jest dopełniana innymi ośrodkami (wyniki odrzucane);
+     przy więcej niż 5 skonfigurowanych ośrodkach — jedno zapytanie na każde 5.
+   - Endpoint **nie widzi terminów daleko w przyszłości** (14.09 pokazał termin za 29 dni, ale nie termin
+     za 35 dni widoczny w pełnym harmonogramie; przyjęty zasięg: 28 dni).
+   - Jeśli najbliższy termin **sam spełnia kryteria** — od razu rezerwacja (2.2).
+2. **Pełny harmonogram** — `OneCenterExam` dla **jednego** ośrodka (`[26, 25]` → 400, zweryfikowane);
+   przy kilku ośrodkach — kolejno, po jednym na sprawdzenie.
+   - **Pomijany**, gdy nie może znaleźć pasującego terminu: najbliższy termin ośrodka jest poza oknem
+     wyszukiwania (2.6), albo najbliższego terminu brak, a okno mieści się w zasięgu endpointu najbliższych
+     terminów. Wtedy sprawdzenie wykonywane jest endpointem najbliższych terminów.
+   - **Przyspieszany**: gdy najbliższy termin ośrodka **zmienił się** i mieści się w oknie, pełny harmonogram
+     tego ośrodka pobierany jest przy najbliższym sprawdzeniu, poza kolejnością.
+
+Gdy wybrany endpoint nie ma zapasu zapytań, sprawdzenie wykonywane jest drugim. Gdy żaden nie ma — aplikacja
+czeka (informacja na ekranie).
 
 #### 2.7.2. Budżet zapytań
 
 - Aplikacja śledzi `X-RateLimit-Remaining` / `X-RateLimit-Reset` dla każdego endpointu osobno.
 - **Rezerwa na rezerwację**: dla `OneCenterExam` aplikacja zostawia co najmniej **2 zapytania** w bieżącym oknie
-  (przebieg flow w UI wywołuje ten endpoint przy wejściu w krok „Termin”). Pełne sprawdzenie, które zeszłoby
-  poniżej rezerwy, jest odkładane do resetu okna.
-- Dla wykrywacza aplikacja zostawia **1 zapytanie** zapasu.
-- Po wyczerpaniu budżetu aplikacja czeka do `X-RateLimit-Reset` i informuje o tym na ekranie (mniej istotne).
+  (przebieg flow w UI wywołuje ten endpoint przy wejściu w krok „Termin”).
+- Dla `MultipleCentersExams` aplikacja zostawia **1 zapytanie** zapasu.
+- Po wyczerpaniu budżetu obu endpointów aplikacja czeka do `X-RateLimit-Reset` i informuje o tym na ekranie
+  (mniej istotne).
+
+#### 2.7.3. Dodatkowe sprawdzenia po utracie terminu
+
+- Nieopłacona rezerwacja jest anulowana po **30 minutach** („Minął maksymalny czas na rozpoczęcie płatności”,
+  6.7.6), a termin wraca do puli.
+- Gdy rezerwacja pasującego terminu się nie uda (np. termin zajął ktoś inny), aplikacja planuje **dodatkowe
+  sprawdzenia** tego ośrodka na moment, w którym cudza nieopłacona rezerwacja może wygasnąć:
+  - ostatnie zobaczenie terminu + 30 min (najwcześniejszy możliwy moment),
+  - chwila nieudanej rezerwacji + 30 min + opóźnienia, domyślnie **0, 2 i 5 min**.
+- Dodatkowe sprawdzenie wykonywane jest o czasie, poza regularnym rytmem, z tych samych limitów (2.7.2).
 
 ### 2.8. Monitoring wcześniejszych terminów po rezerwacji
 
@@ -177,9 +188,10 @@ Wybór spośród terminów spełniających warunki: **najwcześniejszy termin** 
 | okno wyszukiwania | liczba dni od teraz (2.6) | 14 |
 | przedział godziny startu | od–do, dopuszczalna godzina rozpoczęcia egzaminu (2.4) | 10:00–15:00 |
 | minimalny czas do startu | minimalny odstęp od teraz do startu egzaminu (2.4) | 6 h |
-| interwał wykrywacza | co ile wołać `MultipleCentersExams` (2.7.1) | 7 min |
-| min. odstęp pełnego sprawdzenia | minimalny odstęp cyklicznych `OneCenterExam` (2.7.1) | 15 min |
+| interwał sprawdzania | co ile sekund sprawdzać, na zmianę endpointami (2.7.1) | 210 s |
 | rezerwa zapytań na rezerwację | ile zapytań `OneCenterExam` zostawić w oknie (2.7.2) | 2 |
+| rezerwa zapytań najbliższych terminów | ile zapytań `MultipleCentersExams` zostawić w oknie (2.7.2) | 1 |
+| opóźnienia sprawdzeń po utracie terminu | minuty po upływie 30-min rezerwacji konkurenta (2.7.3) | 0, 2, 5 |
 | interwał przypomnień o płatności | co ile przypominać w trakcie 30-min okna (2.3) | 5 min |
 | e-mail | serwer SMTP, port, login, hasło, nadawca, odbiorca (2.10) | — |
 | CallMeBot (WhatsApp) | numer telefonu, klucz API (2.10) | — |
@@ -221,6 +233,12 @@ Niepowodzenie wysyłki jednym kanałem nie może blokować drugiego ani przerywa
   `X-RateLimit-Remaining` i nie schodzi do zera (zapas na przebieg rezerwacji).
 - **Jedna karta aplikacji** — serwis blokuje drugą otwartą kartę w tej samej przeglądarce (6.6);
   aplikacja działa w **jednej karcie**.
+- **Szybkość rezerwacji** — o terminy konkurują inni użytkownicy i boty, więc przebieg formularza nie może mieć
+  stałych opóźnień: po każdym kroku aplikacja czeka tylko na przejście formularza do kolejnego kroku.
+  Czas przebiegu formularza jest wypisywany na ekranie.
+- **Zgodność z regulaminem** — aplikacja nie obchodzi limitów serwisu (np. wieloma przeglądarkami lub sesjami);
+  większa liczba sprawdzeń wynika wyłącznie z wykorzystania osobnych limitów dwóch endpointów, z których
+  korzysta sam frontend.
 
 ## 4. Technologie i architektura
 

@@ -27,8 +27,8 @@ def test_defaults(tmp_path):
     assert config.search.start_time_from == time(10, 0)
     assert config.search.start_time_to == time(15, 0)
     assert config.search.min_lead_time == timedelta(hours=6)
-    assert config.polling.detector_interval == timedelta(minutes=7)
-    assert config.polling.full_check_min_interval == timedelta(minutes=15)
+    assert config.polling.check_interval == timedelta(seconds=210)
+    assert config.polling.release_check_delays == (timedelta(0), timedelta(minutes=2), timedelta(minutes=5))
     assert config.polling.reservation_reserve == 2
     assert config.polling.detector_reserve == 1
     assert config.payment.hold == timedelta(minutes=30)
@@ -45,14 +45,16 @@ def test_overrides_and_unquoted_times(tmp_path):
       start_time_to: "14:00"
       min_lead_hours: 4.5
     polling:
-      detector_interval_minutes: 10
+      check_interval_seconds: 300
+      release_check_delays_minutes: [1, 3]
     """))
 
     assert config.search.window_days == 7
     assert config.search.start_time_from == time(9, 30)
     assert config.search.start_time_to == time(14, 0)
     assert config.search.min_lead_time == timedelta(hours=4, minutes=30)
-    assert config.polling.detector_interval == timedelta(minutes=10)
+    assert config.polling.check_interval == timedelta(seconds=300)
+    assert config.polling.release_check_delays == (timedelta(minutes=1), timedelta(minutes=3))
 
 
 def test_environment_variables_and_literal_values(tmp_path, monkeypatch):
@@ -119,3 +121,11 @@ def test_start_time_range_must_be_ordered(tmp_path):
 def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "missing.yaml")
+
+
+def test_removed_polling_keys_are_reported(tmp_path):
+    with pytest.raises(ConfigError, match="check_interval_seconds"):
+        load_config(write_config(tmp_path, MINIMAL + """
+    polling:
+      detector_interval_minutes: 7
+    """))
