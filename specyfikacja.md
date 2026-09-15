@@ -288,6 +288,11 @@ Rozpoznanie wykonane bez logowania: headless Chromium (Playwright) + analiza pub
 - Dwie metody: **eDO App** oraz **login.gov.pl**.
 - Ścieżka mObywatel: karta **„login.gov.pl”** → przekierowanie na `login.gov.pl` → przycisk
   **„Aplikacja mObywatel”** („Skanuj kod QR za pomocą aplikacji mObywatel”) → kod QR.
+- **Zmiana na login.gov.pl (zaobserwowana 15.09 wieczorem)**: opcje logowania to kafelki
+  `<button role="link" class="wds-action-tile">` (rola „link”, nie „button”), a na górze jest sekcja „Ostatnio
+  wybrany sposób logowania”. Wyszukiwanie opcji po roli „button” przestało działać — przez to ponowne logowanie
+  zawieszało się w pętli (kliknięcie 30 s + oczekiwanie 60 s). Aplikacja szuka opcji po roli „link” lub „button”;
+  kliknięcie otwiera stronę z kodem QR po ok. 1 s.
 - Po zalogowaniu powrót na `returnUrl` (`/reservation`).
 
 ### 6.2. Sesja

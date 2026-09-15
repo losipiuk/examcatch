@@ -22,6 +22,8 @@ from examcatch.service import BASE_URL
 LOGIN_TIMEOUT = timedelta(minutes=10)
 # Host of the page showing the mObywatel QR code.
 MOBYWATEL_LOGIN_HOST = "login.mobywatel.gov.pl"
+# Accessible name of the login method option on login.gov.pl.
+MOBYWATEL_OPTION = re.compile("Aplikacja mObywatel")
 PAGE_SETTLE_MS = 3000
 # The frontend logs out after 10 minutes without user activity (specyfikacja.md, 6.2).
 KEEP_ALIVE_INTERVAL_SECONDS = 60
@@ -208,10 +210,13 @@ class Session:
             return False
         if MOBYWATEL_LOGIN_HOST not in page.url:
             self._notifier.info("Choosing the mObywatel app.")
+            # The option used to be a button; since 2026-09-15 it is a tile with role "link". Accept either.
+            option = page.get_by_role("link", name=MOBYWATEL_OPTION).or_(page.get_by_role("button", name=MOBYWATEL_OPTION))
             try:
-                page.get_by_role("button", name=re.compile("Aplikacja mObywatel")).click(no_wait_after=True)
+                option.first.click(no_wait_after=True, timeout=15_000)
             except PlaywrightTimeoutError:
-                pass  # clicking navigates to the QR page, which may outlast the click; the URL check below decides
+                if MOBYWATEL_LOGIN_HOST not in page.url and not _is_logged_in_url(page.url):
+                    raise PlaywrightTimeoutError("the 'Aplikacja mObywatel' option was not found on login.gov.pl") from None
             page.wait_for_url(lambda url: MOBYWATEL_LOGIN_HOST in url or _is_logged_in_url(url), timeout=60_000)
             if not self._on_login_page():
                 return False
