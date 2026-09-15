@@ -138,9 +138,10 @@ które mają **osobne limity** (po 10 zapytań/h, minus rezerwy z 2.7.2):
    - Jeśli najbliższy termin **sam spełnia kryteria** — od razu rezerwacja (2.2).
 2. **Pełny harmonogram** — `OneCenterExam` dla **jednego** ośrodka (`[26, 25]` → 400, zweryfikowane);
    przy kilku ośrodkach — kolejno, po jednym na sprawdzenie.
-   - **Pomijany**, gdy nie może znaleźć pasującego terminu: najbliższy termin ośrodka jest poza oknem
-     wyszukiwania (2.6), albo najbliższego terminu brak, a okno mieści się w zasięgu endpointu najbliższych
-     terminów. Wtedy sprawdzenie wykonywane jest endpointem najbliższych terminów.
+   - Wykonywany **zawsze w swojej kolejce** — nowy termin w oknie wykrywa tak samo jak endpoint najbliższych
+     terminów, a limit ma osobny. (Pierwotnie był pomijany, gdy najbliższy termin był poza oknem; wtedy same
+     zapytania o najbliższe terminy wyczerpywały limit po ~30 min i do końca godziny nic nie było sprawdzane —
+     zaobserwowane 15.09.)
    - **Przyspieszany**: gdy najbliższy termin ośrodka **zmienił się** i mieści się w oknie, pełny harmonogram
      tego ośrodka pobierany jest przy najbliższym sprawdzeniu, poza kolejnością.
 

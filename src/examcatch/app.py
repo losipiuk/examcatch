@@ -19,7 +19,7 @@ from examcatch.notify import Notifier
 from examcatch.planner import CheckScheduler
 from examcatch.ratelimit import RateLimiter
 from examcatch.reservation import ReservationFlow
-from examcatch.service import ALL_SCHEDULE_PATH, NEAREST_SCHEDULE_HORIZON, NEAREST_SCHEDULE_PATH
+from examcatch.service import ALL_SCHEDULE_PATH, NEAREST_SCHEDULE_PATH
 
 PAID_COMMAND = "paid"
 # The reservation form searches from today + 2 days by default; used if the API rejects earlier start dates.
@@ -249,7 +249,6 @@ class App:
             self._center_ids,
             can_nearest=self._limiter.can_spend(NEAREST_SCHEDULE_PATH, current, polling.detector_reserve),
             can_full=self._limiter.can_spend(ALL_SCHEDULE_PATH, current, polling.reservation_reserve),
-            before=before,
         )
         if check is None:
             resets = [
@@ -333,7 +332,6 @@ class App:
     def _new_scheduler(self) -> CheckScheduler:
         return CheckScheduler(
             self._criteria,
-            NEAREST_SCHEDULE_HORIZON,
             hold=self._config.payment.hold,
             release_checks_in_window=self._config.polling.release_checks_in_window,
             release_check_grace=self._config.polling.release_check_grace,

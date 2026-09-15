@@ -34,13 +34,11 @@ class CheckScheduler:
     def __init__(
         self,
         criteria: SlotCriteria,
-        nearest_horizon: timedelta,
         hold: timedelta,
         release_checks_in_window: int,
         release_check_grace: timedelta,
     ):
         self._criteria = criteria
-        self._nearest_horizon = nearest_horizon
         self._hold = hold
         self._release_checks_in_window = max(release_checks_in_window, 1)
         self._release_check_grace = release_check_grace
@@ -57,25 +55,26 @@ class CheckScheduler:
         center_ids: Sequence[int],
         can_nearest: bool,
         can_full: bool,
-        before: datetime | None = None,
     ) -> PlannedCheck | None:
         """Picks the next check, or None when neither endpoint has requests to spare.
 
-        `before` is the start of the current reservation when monitoring for earlier slots.
+        Both endpoints detect new slots and have separate limits, so they always take turns; skipping one would only
+        exhaust the other's limit sooner and leave the rest of the hour unchecked.
         """
         due = sorted((at, center_id) for at, center_id in self._release_checks if at <= now and center_id in center_ids)
         if due and (can_full or can_nearest):
             self._release_checks.remove(due[0])
+            self._full_next = not can_full
             return PlannedCheck(due[0][1]) if can_full else NEAREST_CHECK
 
         self._urgent_full = [center_id for center_id in self._urgent_full if center_id in center_ids]
         if self._urgent_full and can_full:
+            self._full_next = False
             return PlannedCheck(self._urgent_full.pop(0))
 
-        useful = [center_id for center_id in center_ids if self._full_check_useful(center_id, now, before)]
-        if can_full and useful and (self._full_next or not can_nearest):
+        if can_full and center_ids and (self._full_next or not can_nearest):
             self._full_next = False
-            center_id = useful[self._full_rotation % len(useful)]
+            center_id = center_ids[self._full_rotation % len(center_ids)]
             self._full_rotation += 1
             return PlannedCheck(center_id)
         if can_nearest:
@@ -139,13 +138,3 @@ class CheckScheduler:
     def next_wakeup(self, now: datetime, interval: timedelta) -> datetime:
         """When to check next: after the regular interval, or earlier for a planned release check."""
         return min([now + interval, *(at for at, _ in self._release_checks if at > now)])
-
-    def _full_check_useful(self, center_id: int, now: datetime, before: datetime | None) -> bool:
-        nearest = self._previous_nearest.get(center_id, _UNSEEN)
-        if nearest is _UNSEEN:
-            return True
-        if nearest is None:
-            # Nothing within the nearest-slot endpoint's horizon; only a window reaching beyond it can hold slots.
-            return self._criteria.window_end(now) > now + self._nearest_horizon
-        assert isinstance(nearest, Slot)
-        return self._criteria.may_precede_matches(nearest, now, before)

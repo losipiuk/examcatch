@@ -15,70 +15,56 @@ def slot(day: int, hour: int, minute: int = 0, center_id: int = 25) -> Slot:
 
 
 def scheduler(criteria: SlotCriteria = CRITERIA) -> CheckScheduler:
-    return CheckScheduler(
-        criteria,
-        nearest_horizon=timedelta(days=28),
-        hold=timedelta(minutes=30),
-        release_checks_in_window=3,
-        release_check_grace=timedelta(minutes=1),
-    )
+    return CheckScheduler(criteria, hold=timedelta(minutes=30), release_checks_in_window=3, release_check_grace=timedelta(minutes=1))
+
+
+def run_checks(subject: CheckScheduler, count: int, nearest: Slot | None, center_ids: tuple[int, ...] = (25,)) -> list[PlannedCheck]:
+    checks = []
+    for minute in range(count):
+        current = NOW + timedelta(minutes=minute)
+        check = subject.choose(current, list(center_ids), can_nearest=True, can_full=True)
+        checks.append(check)
+        if check.is_full:
+            subject.record_full(check.center_id, [], current)
+        else:
+            subject.record_nearest({center_id: nearest for center_id in center_ids}, current)
+    return checks
 
 
 def test_starts_with_nearest_check():
     assert scheduler().choose(NOW, [25], can_nearest=True, can_full=True) == NEAREST_CHECK
 
 
-def test_new_nearest_slot_in_window_triggers_full_check():
-    subject = scheduler()
-    subject.record_nearest({25: slot(15, 7)}, NOW)
-
-    assert subject.choose(NOW, [25], can_nearest=True, can_full=True) == PlannedCheck(25)
+def test_new_nearest_slot_in_window_triggers_full_check_as_its_turn():
+    assert run_checks(scheduler(), 4, slot(15, 7)) == [NEAREST_CHECK, PlannedCheck(25), NEAREST_CHECK, PlannedCheck(25)]
 
 
-def test_alternates_endpoints_while_full_checks_are_useful():
+def test_keeps_alternating_when_nearest_slot_is_beyond_window():
+    # Skipping full checks here used to exhaust the nearest-slot limit within half an hour (seen on 2026-09-15).
+    assert run_checks(scheduler(), 4, slot(29, 7)) == [NEAREST_CHECK, PlannedCheck(25), NEAREST_CHECK, PlannedCheck(25)]
+
+
+def test_rotates_full_checks_over_centers():
+    subject = scheduler(SlotCriteria(SearchConfig(), [25, 26]))
+
+    checks = run_checks(subject, 4, None, center_ids=(25, 26))
+
+    assert checks == [NEAREST_CHECK, PlannedCheck(25), NEAREST_CHECK, PlannedCheck(26)]
+
+
+def test_changed_nearest_slot_brings_full_check_forward():
     subject = scheduler()
     subject.record_nearest({25: slot(15, 7)}, NOW)
     subject.record_full(25, [], NOW)
-
-    checks = []
-    for minute in range(4):
-        current = NOW + timedelta(minutes=minute)
-        check = subject.choose(current, [25], can_nearest=True, can_full=True)
-        checks.append(check)
-        if check.is_full:
-            subject.record_full(25, [], current)
-        else:
-            subject.record_nearest({25: slot(15, 7)}, current)
-
-    assert checks == [NEAREST_CHECK, PlannedCheck(25), NEAREST_CHECK, PlannedCheck(25)]
-
-
-def test_skips_full_checks_when_nearest_slot_is_beyond_window():
-    subject = scheduler()
-    subject.record_nearest({25: slot(29, 7)}, NOW)
-
-    assert [subject.choose(NOW, [25], can_nearest=True, can_full=True) for _ in range(3)] == [NEAREST_CHECK] * 3
-
-
-def test_skips_full_checks_without_nearest_slot_when_window_is_within_horizon():
-    subject = scheduler()
-    subject.record_nearest({25: None}, NOW)
-
-    assert [subject.choose(NOW, [25], can_nearest=True, can_full=True) for _ in range(2)] == [NEAREST_CHECK] * 2
-
-
-def test_uses_full_checks_without_nearest_slot_when_window_exceeds_horizon():
-    subject = scheduler(SlotCriteria(SearchConfig(window_days=45), [25]))
-    subject.record_nearest({25: None}, NOW)
-
     assert subject.choose(NOW, [25], can_nearest=True, can_full=True) == NEAREST_CHECK
+
+    subject.record_nearest({25: slot(15, 7, 50)}, NOW)
+
     assert subject.choose(NOW, [25], can_nearest=True, can_full=True) == PlannedCheck(25)
 
 
 def test_falls_back_to_the_endpoint_with_requests_left():
     subject = scheduler()
-    subject.record_nearest({25: slot(15, 7)}, NOW)
-    subject.record_full(25, [], NOW)
 
     assert subject.choose(NOW, [25], can_nearest=False, can_full=True) == PlannedCheck(25)
     assert subject.choose(NOW, [25], can_nearest=True, can_full=False) == NEAREST_CHECK
@@ -92,11 +78,11 @@ def test_returns_acceptable_slots():
     assert subject.record_full(25, [slot(17, 12), slot(15, 7), slot(16, 11)], NOW) == [slot(16, 11), slot(17, 12)]
 
 
-def test_monitoring_checks_full_schedule_even_when_nearest_slot_matches():
+def test_monitoring_checks_full_schedule_when_nearest_slot_matches():
     subject = scheduler()
 
     assert subject.record_nearest({25: slot(15, 11)}, NOW, before=slot(25, 11).start) == [slot(15, 11)]
-    assert subject.choose(NOW, [25], can_nearest=True, can_full=True, before=slot(25, 11).start) == PlannedCheck(25)
+    assert subject.choose(NOW, [25], can_nearest=True, can_full=True) == PlannedCheck(25)
 
 
 def test_lost_slot_plans_checks_when_a_competitor_hold_may_expire():
