@@ -161,9 +161,14 @@ czeka (informacja na ekranie).
 - Nieopłacona rezerwacja jest anulowana po **30 minutach** („Minął maksymalny czas na rozpoczęcie płatności”,
   6.7.6), a termin wraca do puli.
 - Gdy rezerwacja pasującego terminu się nie uda (np. termin zajął ktoś inny), aplikacja planuje **dodatkowe
-  sprawdzenia** tego ośrodka na moment, w którym cudza nieopłacona rezerwacja może wygasnąć:
-  - ostatnie zobaczenie terminu + 30 min (najwcześniejszy możliwy moment),
-  - chwila nieudanej rezerwacji + 30 min + opóźnienia, domyślnie **0, 2 i 5 min**.
+  sprawdzenia** tego ośrodka na moment, w którym cudza nieopłacona rezerwacja może wygasnąć.
+- Konkurent zarezerwował termin między naszym **ostatnim zobaczeniem terminu** a **nieudaną próbą**, więc jego
+  rezerwacja wygasa w oknie **[ostatnie zobaczenie + 30 min, nieudana próba + 30 min]** — górna granica to
+  najpóźniejszy moment odblokowania terminu.
+- W tym oknie wykonywane są sprawdzenia rozłożone równomiernie, **od dolnej do górnej granicy**
+  (domyślnie **3**: początek, środek, koniec okna). Jeśli terminu wcześniej nie widzieliśmy — jedno na górnej granicy.
+- Plus **jedno sprawdzenie po upływie zapasu** za górną granicą (domyślnie **1 min**, `0` wyłącza) — na wypadek,
+  gdyby serwis anulował nieopłacone rezerwacje z opóźnieniem (nieznane).
 - Dodatkowe sprawdzenie wykonywane jest o czasie, poza regularnym rytmem, z tych samych limitów (2.7.2).
 
 ### 2.8. Monitoring wcześniejszych terminów po rezerwacji
@@ -191,7 +196,8 @@ czeka (informacja na ekranie).
 | interwał sprawdzania | co ile sekund sprawdzać, na zmianę endpointami (2.7.1) | 210 s |
 | rezerwa zapytań na rezerwację | ile zapytań `OneCenterExam` zostawić w oknie (2.7.2) | 2 |
 | rezerwa zapytań najbliższych terminów | ile zapytań `MultipleCentersExams` zostawić w oknie (2.7.2) | 1 |
-| opóźnienia sprawdzeń po utracie terminu | minuty po upływie 30-min rezerwacji konkurenta (2.7.3) | 0, 2, 5 |
+| sprawdzenia w oknie po utracie terminu | ile sprawdzeń rozłożyć w oknie wygaśnięcia rezerwacji konkurenta (2.7.3) | 3 |
+| zapas po oknie | minuty po górnej granicy okna na dodatkowe sprawdzenie; 0 wyłącza (2.7.3) | 1 min |
 | interwał przypomnień o płatności | co ile przypominać w trakcie 30-min okna (2.3) | 5 min |
 | e-mail | serwer SMTP, port, login, hasło, nadawca, odbiorca (2.10) | — |
 | CallMeBot (WhatsApp) | numer telefonu, klucz API (2.10) | — |

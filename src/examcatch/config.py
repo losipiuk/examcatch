@@ -40,8 +40,9 @@ class PollingConfig:
     check_interval: timedelta = timedelta(seconds=210)
     reservation_reserve: int = 2
     detector_reserve: int = 1
-    # Extra checks after a lost slot's competitor hold may expire (hold time + each delay).
-    release_check_delays: tuple[timedelta, ...] = (timedelta(0), timedelta(minutes=2), timedelta(minutes=5))
+    # Extra checks when a lost slot's competitor hold may expire: spread over the possible window, plus one after it.
+    release_checks_in_window: int = 3
+    release_check_grace: timedelta = timedelta(minutes=1)
 
 
 @dataclass(frozen=True)
@@ -159,25 +160,27 @@ def _parse_search(data: dict[str, Any]) -> SearchConfig:
 
 def _parse_polling(data: dict[str, Any]) -> PollingConfig:
     defaults = PollingConfig()
-    for removed in ("detector_interval_minutes", "full_check_min_interval_minutes"):
+    removed_keys = {
+        "detector_interval_minutes": "polling.check_interval_seconds",
+        "full_check_min_interval_minutes": "polling.check_interval_seconds",
+        "release_check_delays_minutes": "polling.release_checks_in_window and polling.release_check_grace_minutes",
+    }
+    for removed, replacement in removed_keys.items():
         if removed in data:
-            raise ConfigError(f"polling.{removed}: no longer supported, use polling.check_interval_seconds")
-    delays = _get(
-        data,
-        "release_check_delays_minutes",
-        "polling",
-        [int(delay.total_seconds() // 60) for delay in defaults.release_check_delays],
-    )
-    if not isinstance(delays, list):
-        raise ConfigError("polling.release_check_delays_minutes: must be a list of minutes")
+            raise ConfigError(f"polling.{removed}: no longer supported, use {replacement}")
     return PollingConfig(
         check_interval=timedelta(seconds=_as_int(
             _get(data, "check_interval_seconds", "polling", int(defaults.check_interval.total_seconds())),
             "polling.check_interval_seconds",
             minimum=30,
         )),
-        release_check_delays=tuple(
-            timedelta(minutes=_as_int(delay, "polling.release_check_delays_minutes")) for delay in delays
+        release_checks_in_window=_as_int(
+            _get(data, "release_checks_in_window", "polling", defaults.release_checks_in_window),
+            "polling.release_checks_in_window",
+            minimum=1,
+        ),
+        release_check_grace=_minutes(
+            data, "release_check_grace_minutes", "polling", defaults.release_check_grace, minimum=0
         ),
         reservation_reserve=_as_int(
             _get(data, "reservation_reserve_requests", "polling", defaults.reservation_reserve),

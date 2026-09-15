@@ -19,7 +19,8 @@ def scheduler(criteria: SlotCriteria = CRITERIA) -> CheckScheduler:
         criteria,
         nearest_horizon=timedelta(days=28),
         hold=timedelta(minutes=30),
-        release_check_delays=(timedelta(0), timedelta(minutes=2), timedelta(minutes=5)),
+        release_checks_in_window=3,
+        release_check_grace=timedelta(minutes=1),
     )
 
 
@@ -106,15 +107,22 @@ def test_lost_slot_plans_checks_when_a_competitor_hold_may_expire():
 
     planned = subject.record_lost_slot(lost, failed_at)
 
+    # The competitor reserved between NOW and failed_at, so their hold expires between NOW + 30 and failed_at + 30.
     assert planned == [
         NOW + timedelta(minutes=30),
+        NOW + timedelta(minutes=32),
         failed_at + timedelta(minutes=30),
-        failed_at + timedelta(minutes=32),
-        failed_at + timedelta(minutes=35),
+        failed_at + timedelta(minutes=31),
     ]
     assert subject.next_wakeup(failed_at, INTERVAL) == failed_at + INTERVAL
     assert subject.next_wakeup(NOW + timedelta(minutes=28), INTERVAL) == NOW + timedelta(minutes=30)
     assert subject.choose(NOW + timedelta(minutes=30), [25], can_nearest=True, can_full=True) == PlannedCheck(25)
+
+
+def test_lost_slot_never_seen_is_checked_at_upper_bound_and_after_grace():
+    subject = scheduler()
+
+    assert subject.record_lost_slot(slot(16, 11), NOW) == [NOW + timedelta(minutes=30), NOW + timedelta(minutes=31)]
 
 
 def test_release_check_uses_nearest_endpoint_when_full_budget_is_used_up():

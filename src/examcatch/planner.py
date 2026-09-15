@@ -36,12 +36,14 @@ class CheckScheduler:
         criteria: SlotCriteria,
         nearest_horizon: timedelta,
         hold: timedelta,
-        release_check_delays: Sequence[timedelta],
+        release_checks_in_window: int,
+        release_check_grace: timedelta,
     ):
         self._criteria = criteria
         self._nearest_horizon = nearest_horizon
         self._hold = hold
-        self._release_check_delays = tuple(release_check_delays)
+        self._release_checks_in_window = max(release_checks_in_window, 1)
+        self._release_check_grace = release_check_grace
         self._previous_nearest: dict[int, object] = {}
         self._urgent_full: list[int] = []
         self._release_checks: list[tuple[datetime, int]] = []
@@ -116,11 +118,20 @@ class CheckScheduler:
     def record_lost_slot(self, slot: Slot, now: datetime) -> list[datetime]:
         """Plans checks for when someone else's unpaid hold on the slot may expire; returns their times.
 
-        The competitor reserved it between our last sighting and now, and an unpaid reservation is cancelled after
-        the hold time.
+        The competitor reserved the slot between our last sighting and now, so their unpaid reservation is cancelled
+        between last sighting + hold and now + hold. Checks are spread evenly over that window, ending at its upper
+        bound, plus one check a grace period later in case the service cancels with a delay.
         """
-        taken_after = self._last_seen.get(slot.key, now)
-        moments = {taken_after + self._hold, *(now + self._hold + delay for delay in self._release_check_delays)}
+        earliest = self._last_seen.get(slot.key, now) + self._hold
+        latest = now + self._hold
+        count = self._release_checks_in_window
+        if count == 1 or latest <= earliest:
+            moments = {latest}
+        else:
+            step = (latest - earliest) / (count - 1)
+            moments = {earliest + step * index for index in range(count)}
+        if self._release_check_grace > timedelta(0):
+            moments.add(latest + self._release_check_grace)
         planned = sorted(moment for moment in moments if moment > now)
         self._release_checks.extend((moment, slot.center_id) for moment in planned)
         return planned

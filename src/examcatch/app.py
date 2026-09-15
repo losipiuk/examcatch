@@ -335,7 +335,8 @@ class App:
             self._criteria,
             NEAREST_SCHEDULE_HORIZON,
             hold=self._config.payment.hold,
-            release_check_delays=self._config.polling.release_check_delays,
+            release_checks_in_window=self._config.polling.release_checks_in_window,
+            release_check_grace=self._config.polling.release_check_grace,
         )
 
 

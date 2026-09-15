@@ -28,7 +28,8 @@ def test_defaults(tmp_path):
     assert config.search.start_time_to == time(15, 0)
     assert config.search.min_lead_time == timedelta(hours=6)
     assert config.polling.check_interval == timedelta(seconds=210)
-    assert config.polling.release_check_delays == (timedelta(0), timedelta(minutes=2), timedelta(minutes=5))
+    assert config.polling.release_checks_in_window == 3
+    assert config.polling.release_check_grace == timedelta(minutes=1)
     assert config.polling.reservation_reserve == 2
     assert config.polling.detector_reserve == 1
     assert config.payment.hold == timedelta(minutes=30)
@@ -46,7 +47,8 @@ def test_overrides_and_unquoted_times(tmp_path):
       min_lead_hours: 4.5
     polling:
       check_interval_seconds: 300
-      release_check_delays_minutes: [1, 3]
+      release_checks_in_window: 2
+      release_check_grace_minutes: 0
     """))
 
     assert config.search.window_days == 7
@@ -54,7 +56,8 @@ def test_overrides_and_unquoted_times(tmp_path):
     assert config.search.start_time_to == time(14, 0)
     assert config.search.min_lead_time == timedelta(hours=4, minutes=30)
     assert config.polling.check_interval == timedelta(seconds=300)
-    assert config.polling.release_check_delays == (timedelta(minutes=1), timedelta(minutes=3))
+    assert config.polling.release_checks_in_window == 2
+    assert config.polling.release_check_grace == timedelta(0)
 
 
 def test_environment_variables_and_literal_values(tmp_path, monkeypatch):

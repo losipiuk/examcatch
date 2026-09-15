@@ -20,7 +20,10 @@ polling:
   check_interval_seconds: 210            # ~17 checks per hour in total
   reservation_reserve_requests: 2        # full-schedule requests kept for the reservation form
   detector_reserve_requests: 1           # nearest-slot requests kept in reserve
-  release_check_delays_minutes: [0, 2, 5]  # extra checks 30 min (+ delay) after losing a slot to someone else
+  # After losing a slot to someone else, their unpaid hold expires 30 min after they reserved it, i.e. between
+  # (last time we saw the slot + 30 min) and (our failed attempt + 30 min); checks are spread over that window.
+  release_checks_in_window: 3
+  release_check_grace_minutes: 1         # one more check after the window, in case cancellation lags; 0 disables
 
 payment:
   hold_minutes: 30              # how long the service holds an unpaid reservation
