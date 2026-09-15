@@ -476,6 +476,13 @@ Nagłówki na każdej odpowiedzi API terminów: `x-ratelimit-limit: 10`, `x-rate
 
 - `reset − date` = **3600 s** przy pierwszym zapytaniu → **10 zapytań na godzinę**, okno stałe (nie przesuwne).
 - **Osobny licznik na endpoint** (`MultipleCentersExams` i `OneCenterExam` miały różne `reset` i `remaining`).
+- **Licznik wspólny dla konta, nie dla przeglądarki** (test 15.09 21:18, `research/verify_parallel_limits.py`,
+  autorzy serwisu dopuszczają do 4 równoległych przeglądarek): druga i trzecia przeglądarka z osobnym profilem,
+  osobnym logowaniem i identyfikatorem urządzenia kontynuowały ten sam licznik co główna aplikacja
+  (`MultipleCentersExams`: 6 → 5 → 4 w pierwszej, 3 w drugiej, ten sam `reset`; `OneCenterExam`: 9 w pierwszej,
+  8 w drugiej). Wniosek: **więcej przeglądarek nie zwiększa limitu** (limit na konto lub adres IP).
+- Równoległe sesje na tym samym koncie nie wylogowują się nawzajem (główna aplikacja działała dalej po zalogowaniu
+  dwóch przeglądarek testowych).
 - Odpowiedzi 400 też zużywają limit.
 - Przejście flow w UI zużywa zapytanie (wejście w krok „Termin” wywołuje API terminów).
 
