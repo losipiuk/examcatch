@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -22,8 +23,19 @@ LOGIN_TIMEOUT = timedelta(minutes=10)
 # Host of the page showing the mObywatel QR code.
 MOBYWATEL_LOGIN_HOST = "login.mobywatel.gov.pl"
 PAGE_SETTLE_MS = 3000
-# The frontend logs out after 10 minutes without user activity.
+# The frontend logs out after 10 minutes without user activity (specyfikacja.md, 6.2).
 KEEP_ALIVE_INTERVAL_SECONDS = 60
+# The frontend's inactivity timer listens for these events on window and does not check whether they are trusted.
+ACTIVITY_SCRIPT = "() => window.dispatchEvent(new MouseEvent('mousemove'))"
+# During the last 2 minutes the frontend ignores activity and shows this dialog; its button extends the session.
+SESSION_WARNING_BUTTON = "app-session-timeout-warning-dialog .session-timeout-warning__actions button"
+# Where the frontend records why it ended the session (the reason is removed once the login page shows it).
+LOGOUT_REASON_KEY = "pudo.session.end.reason"
+LOGOUT_EVENTS_KEY = "pudo.session.end.events"
+READ_LOGOUT_REASON_SCRIPT = (
+    f"() => ({{reason: sessionStorage.getItem('{LOGOUT_REASON_KEY}'), "
+    f"events: sessionStorage.getItem('{LOGOUT_EVENTS_KEY}')}})"
+)
 # Safety net: the application must never start a payment.
 PAYMENT_INIT_ROUTE = "**/payments/init/**"
 # Keep timers and rendering running when the user minimizes or covers the window, so the page keeps its session
@@ -69,6 +81,34 @@ def open_browser(
                 pass
 
 
+def describe_logout_reason(reason_json: str | None, events_json: str | None) -> str | None:
+    """Formats the frontend's stored logout reason, e.g. "idle_timeout at 2026-09-15T12:40:45.000Z".
+
+    Falls back to the latest recorded session event when the reason itself was already consumed.
+    """
+    event = _load_json(reason_json)
+    if not isinstance(event, dict):
+        events = _load_json(events_json)
+        event = events[-1] if isinstance(events, list) and events else None
+    if not isinstance(event, dict) or not event.get("reason"):
+        return None
+    parts = [str(event["reason"])]
+    if event.get("details"):
+        parts.append(f"({event['details']})")
+    if event.get("timestamp"):
+        parts.append(f"at {event['timestamp']}")
+    return " ".join(parts)
+
+
+def _load_json(text: str | None) -> object:
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
 def _is_logged_in_url(url: str) -> bool:
     return url.startswith(BASE_URL) and "/login" not in url
 
@@ -84,7 +124,6 @@ class Session:
         self._notifier = notifier
         self._screenshots_dir = screenshots_dir
         self._last_keep_alive = time.monotonic()
-        self._pointer_toggle = False
 
     def ensure_logged_in(self) -> None:
         """Opens the service and logs in when the stored session is not valid."""
@@ -189,12 +228,31 @@ class Session:
         url = self._page.url
         return not url.startswith(BASE_URL) or "/login" in url
 
+    def logout_reason(self) -> str | None:
+        """The reason the service's frontend recorded for ending the session, if the page can still read it."""
+        if not self._page.url.startswith(BASE_URL):
+            return None
+        try:
+            stored = self._page.evaluate(READ_LOGOUT_REASON_SCRIPT)
+        except PlaywrightError:
+            return None
+        return describe_logout_reason(stored.get("reason"), stored.get("events"))
+
     def _keep_alive(self) -> None:
+        """Keeps the frontend's inactivity timer from ending the session.
+
+        A dispatched activity event also works while the display is off and does not move the user's pointer.
+        """
         if time.monotonic() - self._last_keep_alive < KEEP_ALIVE_INTERVAL_SECONDS:
             return
         self._last_keep_alive = time.monotonic()
-        self._pointer_toggle = not self._pointer_toggle
+        if self._on_login_page():
+            return
         try:
-            self._page.mouse.move(400 if self._pointer_toggle else 600, 300)
+            extend = self._page.locator(SESSION_WARNING_BUTTON)
+            if extend.count() and extend.first.is_visible():
+                extend.first.click()
+                self._notifier.info("Confirmed the service's inactivity warning to keep the session.")
+            self._page.evaluate(ACTIVITY_SCRIPT)
         except PlaywrightError:
             pass

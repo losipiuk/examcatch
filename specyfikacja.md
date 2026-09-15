@@ -293,6 +293,20 @@ Rozpoznanie wykonane bez logowania: headless Chromium (Playwright) + analiza pub
   `jwtTtlSeconds: 900`, `jwtRefreshBeforeExpirySeconds: 120`, `frontendInactivitySeconds: 600`.
 - Token trzymany w ciasteczku `__Secure-PUDOJT` (ciasteczko sesyjne, `SameSite=Strict`).
 - Wniosek: sesja wygasa po ~10 min bezczynności; aplikacja musi utrzymywać aktywność.
+- **Licznik bezczynności frontendu** (analiza kodu, 15.09): 10 min + 10 s zapasu. Resetują go zdarzenia
+  `pointerdown`, `mousemove`, `keydown`, `wheel`, `scroll`, `touchstart` nasłuchiwane na `window` (bez sprawdzania,
+  czy pochodzą od użytkownika). W **ostatnich 2 minutach** pokazywane jest okno „Z powodu braku aktywności…”
+  (`app-session-timeout-warning-dialog`) i **aktywność jest ignorowana** — sesję przedłuża tylko przycisk w tym oknie.
+  Po powrocie karty do widoczności (`visibilitychange`) przekroczony termin kończy sesję od razu.
+- Token odświeżany jest przez frontend **co 20 s, niezależnie od aktywności**, gdy do wygaśnięcia zostaje < 2 min.
+- **Powód zakończenia sesji** frontend zapisuje w `sessionStorage`: `pudo.session.end.reason` (usuwany po pokazaniu
+  strony logowania) i `pudo.session.end.events` (20 ostatnich zdarzeń), np. `idle_timeout`,
+  `realtime_unauthorized` ze szczegółami (`jwt_refresh_401`, `http_401`), `manual_logout`.
+- **Podtrzymywanie sesji przez aplikację** (co 60 s): zdarzenie `mousemove` wywoływane w stronie (działa także przy
+  wyłączonym ekranie, nie rusza kursorem) oraz kliknięcie przycisku w oknie ostrzeżenia, jeśli jest widoczne.
+  Przy wykryciu wylogowania aplikacja podaje powód odczytany z `sessionStorage`.
+- 15.09: wylogowanie ok. 14:37–14:40 bez uśpienia komputera (ekran wyłączony 13:55–14:35), przy wcześniejszym
+  podtrzymywaniu ruchem kursora — przyczyna niepotwierdzona (prawdopodobnie ostrzeżenie o bezczynności).
 
 ### 6.3. Kroki formularza rezerwacji
 

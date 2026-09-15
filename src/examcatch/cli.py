@@ -7,6 +7,8 @@ import sys
 import traceback
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
+
 from examcatch.api import ServiceApi
 from examcatch.app import App
 from examcatch.browser import Session, open_browser
@@ -76,9 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with prevent_sleep(config.system.prevent_sleep and not args.test_notifications, notifier):
             return _run(args, config, notifier)
-    except Exception:
-        # Unexpected errors also go to the log file, so a long unattended run can be investigated afterwards.
-        notifier.info(f"Unexpected error:\n{traceback.format_exc()}")
+    except Exception as e:
+        if isinstance(e, PlaywrightError) and "has been closed" in str(e):
+            notifier.important("ExamCatch stopped", "The browser window was closed. Start ExamCatch again to continue.")
+        else:
+            # Unexpected errors also go to the log file, so a long unattended run can be investigated afterwards.
+            notifier.info(f"Unexpected error:\n{traceback.format_exc()}")
         return 1
     finally:
         notifier.close()

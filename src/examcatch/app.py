@@ -312,9 +312,11 @@ class App:
                 self._relogin()
 
     def _relogin(self) -> None:
+        reason = self._session.logout_reason()
         self._notifier.important(
             "Session expired",
-            "Press Enter in the ExamCatch terminal, then scan the QR code in the browser window to log in again.",
+            (f"The service ended the session: {reason}.\n" if reason else "")
+            + "Press Enter in the ExamCatch terminal, then scan the QR code in the browser window to log in again.",
         )
         self._console.drain()
         while self._console.poll() is None:
