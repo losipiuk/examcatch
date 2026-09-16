@@ -38,7 +38,7 @@ def test_defaults(tmp_path):
     assert config.callmebot is None
     assert config.logging.file == Path(".examcatch/examcatch.log")
     assert config.system.prevent_sleep is True
-    assert config.session.renew_after == timedelta(minutes=50)
+    assert config.session.renew_after is None
 
 
 def test_overrides_and_unquoted_times(tmp_path):

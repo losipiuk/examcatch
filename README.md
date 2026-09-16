@@ -37,10 +37,10 @@ uv run examcatch --config config.yaml
    Without the confirmation ExamCatch keeps reminding you and, after 30 minutes, starts searching again.
 4. Afterwards it notifies you about every slot earlier than your reservation. Stop it with Ctrl+C.
 
-The service ends sessions about an hour after login. ExamCatch then logs in again by itself; while the login.gov.pl
-session is still valid no QR code is needed, otherwise it notifies you once to scan the QR code. To keep ahead of
-that, it renews the session 50 minutes after login (`session.renew_after_minutes`, 0 disables) by clearing only the
-portal's session cookies and logging in again; the log says whether a QR code was needed.
+The service ends sessions about an hour after login. ExamCatch then logs in again by itself and notifies you once to
+scan the QR code, so someone has to scan roughly every hour; the portal asks login.gov.pl to re-authenticate every
+time (`ForceAuthn="true"`), so no single sign-on session can spare you the scan. Renewing the session early
+(`session.renew_after_minutes`) is therefore off by default — it would only end a working session sooner.
 
 Everything printed to the terminal is also appended to `.examcatch/examcatch.log`, including unexpected errors with
 their stack trace (configurable under `logging` in `config.yaml`).

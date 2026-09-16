@@ -30,11 +30,11 @@ a płatność użytkownik kończy ręcznie.
      nadal ważna, logowanie kończy się bez kodu QR,
   3. jeśli potrzebny jest kod QR — wysyła ważne powiadomienie (2.10) **raz na jedno logowanie** (nie przy każdym
      odświeżeniu kodu) i czeka na zeskanowanie, po czym wraca do przerwanej czynności.
-- **Odnawianie sesji z wyprzedzeniem** (eksperyment, 15.09) — domyślnie **50 min po zalogowaniu** (konfigurowalne,
-  0 wyłącza) aplikacja przed kolejnym sprawdzeniem opuszcza portal, usuwa **tylko** ciasteczka sesji portalu
-  (`__Secure-PUDOJT`, `__Secure-PUDOJTMD`), **bez wylogowania**, i loguje się ponownie. Hipoteza: jeśli sesja
-  login.gov.pl jest nadal ważna, logowanie przejdzie bez kodu QR i godzinny limit zacznie się od nowa; w logu
-  zapisywane jest, czy QR był potrzebny. Odnowienie nie jest wykonywane w trakcie oczekiwania na płatność.
+- **Odnawianie sesji z wyprzedzeniem — nieskuteczne, domyślnie wyłączone** (`renew_after_minutes: 0`).
+  Mechanizm istnieje (opuszczenie portalu, usunięcie **tylko** ciasteczek `__Secure-PUDOJT`, `__Secure-PUDOJTMD`
+  bez wylogowania, ponowne logowanie; nigdy w trakcie oczekiwania na płatność), ale **nie omija kodu QR** — portal
+  wysyła `ForceAuthn="true"` (6.2), więc każde logowanie wymaga pełnego uwierzytelnienia. Włączony tylko skraca
+  działającą sesję. **Wniosek: ktoś musi skanować QR mniej więcej co godzinę.**
 
 ### 2.2. Przebieg rezerwacji (automatyczne przeklikanie flow)
 
@@ -326,8 +326,15 @@ Rozpoznanie wykonane bez logowania: headless Chromium (Playwright) + analiza pub
   13:33:59 → wylogowanie ok. 14:39. Wniosek: serwer kończy sesję ok. **60–66 min po zalogowaniu**, niezależnie od
   aktywności (prawdopodobnie limit 60 min i odmowa kolejnego odświeżenia 15-min tokenu). Podtrzymywanie aktywności
   tego nie zmienia — konieczne jest ponowne logowanie.
-- **Ponowne logowanie bez QR**: 15:02 logowanie przeszło bez kodu QR (sesja login.gov.pl z 14:44 była nadal ważna).
-  Czas życia sesji login.gov.pl — nieznany.
+- **`ForceAuthn="true"`** (16.09, przechwycone żądanie `AuthnRequest` wysyłane przez portal na
+  `https://login.gov.pl/login/SingleSignOnService`): portal **wymusza pełne uwierzytelnienie przy każdym logowaniu**.
+  Zgodnie z „Instrukcją Integratora Dostawcy Usług” Węzła Krajowego login.gov.pl przy aktywnej sesji pomija wybór
+  dostawcy tożsamości, a dostawca (mObywatel) przy aktywnej sesji uwierzytelnia bez pytania — `ForceAuthn` to
+  wyłącza. **Dlatego każde logowanie wymaga zeskanowania kodu QR** i żadne odnawianie sesji tego nie ominie.
+- Potwierdzenie z praktyki: odnowienie sesji 52 min po zalogowaniu (16.09, 00:20) skończyło się prośbą o kod QR,
+  a aplikacja czekała na zeskanowanie do rana.
+- Jedyny zaobserwowany przypadek logowania bez QR (15.09, 15:02) nastąpił po nagłym zamknięciu przeglądarki —
+  najpewniej ciasteczka sesji portalu przetrwały w profilu, więc pełne logowanie nie było potrzebne.
 
 ### 6.3. Kroki formularza rezerwacji
 

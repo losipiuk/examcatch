@@ -76,8 +76,9 @@ class CallMeBotConfig:
 
 @dataclass(frozen=True)
 class SessionConfig:
-    # Renew the portal session this long after login, before the service ends it (about 60 minutes); None disables it.
-    renew_after: timedelta | None = timedelta(minutes=50)
+    # Renew the portal session this long after login; None disables it. Off by default: the service requests
+    # ForceAuthn="true", so every login needs a fresh QR scan and renewal only ends the session early.
+    renew_after: timedelta | None = None
 
 
 @dataclass(frozen=True)
@@ -241,7 +242,8 @@ def _parse_browser(data: dict[str, Any]) -> BrowserConfig:
 
 
 def _parse_session(data: dict[str, Any]) -> SessionConfig:
-    default_minutes = int(SessionConfig().renew_after.total_seconds() // 60)
+    default = SessionConfig().renew_after
+    default_minutes = int(default.total_seconds() // 60) if default else 0
     minutes = _as_int(_get(data, "renew_after_minutes", "session", default_minutes), "session.renew_after_minutes")
     return SessionConfig(renew_after=timedelta(minutes=minutes) if minutes > 0 else None)
 

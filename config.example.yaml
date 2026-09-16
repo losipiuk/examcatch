@@ -34,9 +34,9 @@ browser:
   screenshots_dir: .examcatch/screenshots
 
 session:
-  # The service ends sessions about an hour after login. Renew earlier by logging in again through the login.gov.pl
-  # session, which may avoid a QR code scan. 0 disables renewal.
-  renew_after_minutes: 50
+  # Renewing the session early cannot avoid a QR scan: the portal requests ForceAuthn="true", so login.gov.pl
+  # re-authenticates on every login regardless of its own session. Keep renewal off (0).
+  renew_after_minutes: 0
 
 system:
   # Keep the computer from idle sleep while ExamCatch runs (macOS caffeinate; the display may still turn off).
