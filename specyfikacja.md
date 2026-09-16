@@ -28,8 +28,12 @@ a płatność użytkownik kończy ręcznie.
   1. aplikacja wypisuje informację o zakończeniu sesji wraz z powodem zapisanym przez serwis,
   2. **od razu, bez potwierdzenia**, ponownie przechodzi przez flow logowania — jeśli sesja login.gov.pl jest
      nadal ważna, logowanie kończy się bez kodu QR,
-  3. jeśli potrzebny jest kod QR — wysyła ważne powiadomienie (2.10) **raz na jedno logowanie** (nie przy każdym
-     odświeżeniu kodu) i czeka na zeskanowanie, po czym wraca do przerwanej czynności.
+  3. jeśli potrzebny jest kod QR — **wysyła kod logowania** (ważne powiadomienie, 2.10): e-mail z **obrazem kodu QR
+     w załączniku** i **kodem tekstowym** w treści (w aplikacji mObywatel: Kod QR → Zeskanuj kod QR → Wpisz kod →
+     wklej → Dalej → Udostępnij dane), WhatsApp z kodem tekstowym; wraz z godziną wygaśnięcia,
+  4. kod jest ważny **5 minut**; po wygaśnięciu aplikacja klika „Odśwież kod QR” i wysyła nowy kod — najwyżej
+     **12 kodów na jedno logowanie** (konfigurowalne, 0 = bez limitu), dalej kody są tylko w oknie przeglądarki,
+  5. po zalogowaniu wysyła **potwierdzenie e-mailem** i wraca do przerwanej czynności.
 - **Odnawianie sesji z wyprzedzeniem — nieskuteczne, domyślnie wyłączone** (`renew_after_minutes: 0`).
   Mechanizm istnieje (opuszczenie portalu, usunięcie **tylko** ciasteczek `__Secure-PUDOJT`, `__Secure-PUDOJTMD`
   bez wylogowania, ponowne logowanie; nigdy w trakcie oczekiwania na płatność), ale **nie omija kodu QR** — portal
@@ -209,7 +213,8 @@ czeka (informacja na ekranie).
 | zapas po oknie | minuty po górnej granicy okna na dodatkowe sprawdzenie; 0 wyłącza (2.7.3) | 1 min |
 | plik logu | plik, do którego dopisywane są wszystkie komunikaty; można wyłączyć (3) | `.examcatch/examcatch.log` |
 | blokada usypiania | czy blokować usypianie komputera z bezczynności podczas działania (3) | włączona |
-| odnawianie sesji | po ilu minutach od zalogowania odnowić sesję portalu; 0 wyłącza (2.1) | 50 min |
+| odnawianie sesji | po ilu minutach od zalogowania odnowić sesję portalu; 0 wyłącza (2.1) | 0 (wyłączone) |
+| limit kodów logowania | ile kodów logowania wysłać na jedno logowanie; 0 = bez limitu (2.1) | 12 |
 | interwał przypomnień o płatności | co ile przypominać w trakcie 30-min okna (2.3) | 5 min |
 | e-mail | serwer SMTP, port, login, hasło, nadawca, odbiorca (2.10) | — |
 | CallMeBot (WhatsApp) | numer telefonu, klucz API (2.10) | — |
@@ -299,6 +304,12 @@ Rozpoznanie wykonane bez logowania: headless Chromium (Playwright) + analiza pub
   wybrany sposób logowania”. Wyszukiwanie opcji po roli „button” przestało działać — przez to ponowne logowanie
   zawieszało się w pętli (kliknięcie 30 s + oczekiwanie 60 s). Aplikacja szuka opcji po roli „link” lub „button”;
   kliknięcie otwiera stronę z kodem QR po ok. 1 s.
+- **Strona z kodem QR** (`login.mobywatel.gov.pl`, 16.09): kod pochodzi z `GET /api/login/auth/qr-code` →
+  `{"value": "data:image/png;base64,…", "token": "8;D;1;;;9216;;<uuid>;<wystawiony>;<wygasa>;<host>;0;3;;"}`
+  (token ma ~97 znaków; to on jest zakodowany w QR). Obraz: `img.scan-qr-code-display-image`. Kod jest ważny
+  **5 minut** („Kod QR wygaśnie za: …”); po wygaśnięciu strona **sama go nie odświeża** — pokazuje „Kod QR wygasł”
+  i przycisk **„Odśwież kod QR”**. W widoku mobilnym ta sama strona pokazuje token jako „Kod:” z przyciskiem
+  „Skopiuj kod” i instrukcją „Wpisz kod” w aplikacji mObywatel.
 - Po zalogowaniu powrót na `returnUrl` (`/reservation`).
 
 ### 6.2. Sesja

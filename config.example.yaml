@@ -37,6 +37,9 @@ session:
   # Renewing the session early cannot avoid a QR scan: the portal requests ForceAuthn="true", so login.gov.pl
   # re-authenticates on every login regardless of its own session. Keep renewal off (0).
   renew_after_minutes: 0
+  # When a login is needed, each login code (QR image + text code, valid 5 minutes) is sent through the notification
+  # channels; expired codes are refreshed. Stop sending after this many codes per login (0 = no limit).
+  max_login_code_notifications: 12
 
 system:
   # Keep the computer from idle sleep while ExamCatch runs (macOS caffeinate; the display may still turn off).

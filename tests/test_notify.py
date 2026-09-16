@@ -4,9 +4,9 @@ from datetime import datetime
 import pytest
 
 from examcatch import notify
-from examcatch.config import CallMeBotConfig, parse_config
+from examcatch.config import CallMeBotConfig, EmailConfig, parse_config
 from examcatch.models import WARSAW
-from examcatch.notify import CallMeBotChannel, Notifier, build_notifier
+from examcatch.notify import Attachment, CallMeBotChannel, EmailChannel, Notifier, build_notifier
 
 CONFIG = CallMeBotConfig(phone="+48123456789", api_key="secret-key")
 
@@ -55,18 +55,19 @@ def test_callmebot_error_page_raises_without_leaking_api_key(monkeypatch):
 class FailingChannel:
     name = "broken"
 
-    def send(self, subject: str, message: str) -> None:
+    def send(self, subject: str, message: str, attachments=()) -> None:
         raise RuntimeError("boom")
 
 
 class RecordingChannel:
-    name = "recording"
-
-    def __init__(self) -> None:
+    def __init__(self, name: str = "recording") -> None:
+        self.name = name
         self.sent: list[tuple[str, str]] = []
+        self.attachments: list[Attachment] = []
 
-    def send(self, subject: str, message: str) -> None:
+    def send(self, subject: str, message: str, attachments=()) -> None:
         self.sent.append((subject, message))
+        self.attachments.extend(attachments)
 
 
 def test_failing_channel_does_not_stop_other_channels():
@@ -78,6 +79,60 @@ def test_failing_channel_does_not_stop_other_channels():
 
     assert recording.sent == [("Exam reserved", "details")]
     assert "Sending broken notification failed: boom" in out.getvalue()
+
+
+def test_important_can_target_channels_and_carry_attachments():
+    email, whatsapp = RecordingChannel("e-mail"), RecordingChannel("WhatsApp")
+    notifier = Notifier([email, whatsapp], out=io.StringIO())
+    qr = Attachment("qr.png", b"png", "image/png")
+
+    notifier.important("Login required", "code", attachments=[qr])
+    notifier.important("Logged in", "done", channel_names={"e-mail"})
+
+    assert email.sent == [("Login required", "code"), ("Logged in", "done")]
+    assert whatsapp.sent == [("Login required", "code")]
+    assert email.attachments == [qr]
+
+
+class FakeSmtp:
+    sent: list = []
+
+    def __init__(self, host: str, port: int, timeout: int) -> None:
+        pass
+
+    def __enter__(self) -> "FakeSmtp":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def starttls(self) -> None:
+        pass
+
+    def login(self, username: str, password: str) -> None:
+        pass
+
+    def send_message(self, message) -> None:
+        FakeSmtp.sent.append(message)
+
+
+def test_email_includes_attachments(monkeypatch):
+    FakeSmtp.sent = []
+    monkeypatch.setattr(notify.smtplib, "SMTP", FakeSmtp)
+    config = EmailConfig(
+        smtp_host="smtp.example.com", smtp_port=587, starttls=True, username="user", password="secret",
+        sender="me@example.com", recipients=("you@example.com",),
+    )
+
+    EmailChannel(config).send("Login required", "Scan the code", [Attachment("qr.png", b"\x89PNG", "image/png")])
+
+    message = FakeSmtp.sent[0]
+    attachment = next(message.iter_attachments())
+    assert message["Subject"] == "ExamCatch: Login required"
+    assert attachment.get_filename() == "qr.png"
+    assert attachment.get_content_type() == "image/png"
+    assert attachment.get_content() == b"\x89PNG"
+    assert message.get_body(("plain",)).get_content().strip() == "Scan the code"
 
 
 def test_messages_go_to_screen_and_log_file():

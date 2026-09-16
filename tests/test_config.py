@@ -39,6 +39,7 @@ def test_defaults(tmp_path):
     assert config.logging.file == Path(".examcatch/examcatch.log")
     assert config.system.prevent_sleep is True
     assert config.session.renew_after is None
+    assert config.session.max_login_code_notifications == 12
 
 
 def test_overrides_and_unquoted_times(tmp_path):
@@ -133,8 +134,10 @@ def test_session_renewal_time_and_disabling(tmp_path):
     config = load_config(write_config(tmp_path, MINIMAL + """
     session:
       renew_after_minutes: 45
+      max_login_code_notifications: 0
     """))
     assert config.session.renew_after == timedelta(minutes=45)
+    assert config.session.max_login_code_notifications == 0
 
     config = load_config(write_config(tmp_path, MINIMAL + """
     session:

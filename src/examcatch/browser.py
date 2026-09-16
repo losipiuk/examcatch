@@ -2,24 +2,37 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, Route, sync_playwright
+from playwright.sync_api import Locator, Page, Response, Route, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from examcatch.api import SessionExpiredError
 from examcatch.config import BrowserConfig
-from examcatch.notify import Notifier
+from examcatch.models import now
+from examcatch.notify import Attachment, EmailChannel, Notifier
 from examcatch.service import BASE_URL
 
-LOGIN_TIMEOUT = timedelta(minutes=10)
+# The mObywatel login page gets its code here: {"value": "data:image/png;base64,...", "token": "8;D;1;..."}.
+# The token is what the QR code encodes and what the app accepts under "Wpisz kod" (specyfikacja.md, 6.1).
+QR_CODE_API_PATH = "/api/login/auth/qr-code"
+# A code is valid for 5 minutes; the page then offers this button instead of refreshing by itself.
+QR_CODE_VALIDITY = timedelta(minutes=5)
+QR_REFRESH_LABEL = "Odśwież kod QR"
+QR_EXPIRY_GRACE_SECONDS = 5
+QR_RESPONSE_TIMEOUT_MS = 15_000
+# The expired-code view may render a few seconds after the timer ends.
+QR_REFRESH_TIMEOUT_MS = 30_000
 # Host of the page showing the mObywatel QR code.
 MOBYWATEL_LOGIN_HOST = "login.mobywatel.gov.pl"
 # Accessible name of the login method option on login.gov.pl.
@@ -122,19 +135,67 @@ def _first_line(error: Exception) -> str:
     return text.splitlines()[0] if text else type(error).__name__
 
 
-def renewal_due(logged_in_at: float | None, now: float, renew_after: timedelta | None) -> bool:
-    """Whether a session that started at `logged_in_at` (monotonic seconds) should be renewed at `now`."""
-    return renew_after is not None and logged_in_at is not None and now - logged_in_at >= renew_after.total_seconds()
+def renewal_due(logged_in_at: float | None, current: float, renew_after: timedelta | None) -> bool:
+    """Whether a session that started at `logged_in_at` (monotonic seconds) should be renewed at `current`."""
+    return (
+        renew_after is not None
+        and logged_in_at is not None
+        and current - logged_in_at >= renew_after.total_seconds()
+    )
+
+
+def qr_refresh_button(page: Page) -> Locator:
+    """The "Odśwież kod QR" control shown once a login code has expired (matched by text, whatever its role)."""
+    return page.locator("button, [role=button], [role=link]").filter(has_text=QR_REFRESH_LABEL).first
+
+
+@dataclass(frozen=True)
+class LoginCode:
+    """A mObywatel login code: the QR image and the same code as text."""
+
+    text: str
+    image_png: bytes | None
+    expires_at: datetime
+
+
+def parse_login_code(token: str, image_data_uri: str | None, received_at: datetime) -> LoginCode:
+    """Builds a login code from the login page's API response.
+
+    The token looks like "8;D;1;;;9216;;<uuid>;<issued epoch>;<expires epoch>;<host>;0;3;;"; its validity is taken
+    from the two timestamps (relative to `received_at`, to avoid clock differences), else 5 minutes.
+    """
+    validity = QR_CODE_VALIDITY
+    epochs = [int(part) for part in token.split(";") if re.fullmatch(r"\d{10}", part)]
+    if len(epochs) >= 2 and epochs[1] > epochs[0]:
+        validity = timedelta(seconds=epochs[1] - epochs[0])
+    image = None
+    prefix = "data:image/png;base64,"
+    if image_data_uri and image_data_uri.startswith(prefix):
+        try:
+            image = base64.b64decode(image_data_uri[len(prefix):], validate=True)
+        except (binascii.Error, ValueError):
+            image = None
+    return LoginCode(text=token, image_png=image, expires_at=received_at + validity)
 
 
 class Session:
-    def __init__(self, page: Page, notifier: Notifier, screenshots_dir: Path, renew_after: timedelta | None = None):
+    def __init__(
+        self,
+        page: Page,
+        notifier: Notifier,
+        screenshots_dir: Path,
+        renew_after: timedelta | None = None,
+        max_login_code_notifications: int = 12,
+    ):
         self._page = page
         self._notifier = notifier
         self._screenshots_dir = screenshots_dir
         self._renew_after = renew_after
+        self._max_code_notifications = max_login_code_notifications
         self._last_keep_alive = time.monotonic()
         self._logged_in_at: float | None = None
+        self._qr_response: Response | None = None
+        page.on("response", self._remember_qr_response)
 
     def ensure_logged_in(self) -> None:
         """Opens the service and logs in when the stored session is not valid."""
@@ -152,11 +213,11 @@ class Session:
         Only the portal's session cookies are cleared, without logging out, so a still valid login.gov.pl session can
         log in again without a QR code. Otherwise the usual QR login runs.
         """
-        now = time.monotonic()
-        if not renewal_due(self._logged_in_at, now, self._renew_after):
+        current = time.monotonic()
+        if not renewal_due(self._logged_in_at, current, self._renew_after):
             return
         assert self._logged_in_at is not None
-        minutes = int((now - self._logged_in_at) // 60)
+        minutes = int((current - self._logged_in_at) // 60)
         self._notifier.info(f"Renewing the session before the service ends it (logged in {minutes} min ago).")
         # Leave the portal first, so its frontend does not react to the missing cookies.
         self._page.goto("about:blank")
@@ -175,11 +236,13 @@ class Session:
             raise SessionExpiredError("not logged in")
 
     def login(self) -> bool:
-        """Logs in again through a still valid login.gov.pl session, or shows the mObywatel QR code and waits for a scan.
+        """Logs in with the mObywatel app; returns whether a login code had to be used.
 
-        The user is notified once per login, not for every refreshed QR code. Returns whether a QR code was needed.
+        Every login code shown is sent to the user (QR image and text) up to the configured limit per login, an
+        expired code is refreshed on the page, and a completed login is confirmed by e-mail.
         """
-        notified = False
+        codes_sent = 0
+        code_needed = False
         while True:
             try:
                 qr_shown = self._start_qr_login()
@@ -192,24 +255,23 @@ class Session:
                 continue
             if not self._on_login_page():
                 break
-            if qr_shown and not notified:
-                self._notifier.important(
-                    "Login required",
-                    "Scan the QR code shown in the ExamCatch browser window with the mObywatel app.",
-                )
-                notified = True
-            try:
-                self._page.wait_for_url(
-                    lambda url: url.startswith(BASE_URL) and "/login" not in url,
-                    timeout=LOGIN_TIMEOUT.total_seconds() * 1000,
-                )
+            code_needed = code_needed or qr_shown
+            logged_in, codes_sent = self._wait_for_code_use(codes_sent)
+            if logged_in:
                 break
-            except PlaywrightTimeoutError:
-                self._notifier.info("Login was not completed in time; showing a new QR code.")
+            self._notifier.info("The login page did not offer a new code; starting the login again.")
         self._page.wait_for_timeout(PAGE_SETTLE_MS)
         self._logged_in_at = time.monotonic()
-        self._notifier.info("Logged in." if notified else "Logged in (no QR code needed).")
-        return notified
+        if code_needed:
+            self._notifier.important(
+                "Logged in",
+                "ExamCatch is logged in and keeps checking. The service ends the session about an hour after login; "
+                "a new login code will be sent then.",
+                channel_names={EmailChannel.name},
+            )
+        else:
+            self._notifier.info("Logged in (no QR code needed).")
+        return code_needed
 
     def wait(self, duration: timedelta) -> None:
         """Waits while keeping the browser responsive and the session active."""
@@ -220,9 +282,81 @@ class Session:
             remaining -= step
             self._keep_alive()
 
+    def _wait_for_code_use(self, codes_sent: int) -> tuple[bool, int]:
+        """Sends each new login code and waits for its use, refreshing codes that expire.
+
+        Returns whether the login completed and the updated number of codes sent. False means the page did not offer
+        a new code, so the login flow has to start again.
+        """
+        page = self._page
+        while True:
+            self._wait_for_qr_response()
+            code = self._take_login_code()
+            wait_seconds = QR_CODE_VALIDITY.total_seconds()
+            if code is not None:
+                if self._max_code_notifications == 0 or codes_sent < self._max_code_notifications:
+                    self._send_login_code(code, first=codes_sent == 0)
+                    codes_sent += 1
+                    if codes_sent == self._max_code_notifications:
+                        self._notifier.info(
+                            "Login code notification limit reached; further codes are shown in the browser window only."
+                        )
+                wait_seconds = max((code.expires_at - now()).total_seconds(), 0) + QR_EXPIRY_GRACE_SECONDS
+            try:
+                page.wait_for_url(_is_logged_in_url, timeout=wait_seconds * 1000)
+                return True, codes_sent
+            except PlaywrightTimeoutError:
+                pass
+            refresh = qr_refresh_button(page)
+            try:
+                refresh.wait_for(state="visible", timeout=QR_REFRESH_TIMEOUT_MS)
+            except PlaywrightTimeoutError:
+                return _is_logged_in_url(page.url), codes_sent
+            self._notifier.info("The login code expired; getting a new one.")
+            refresh.click()
+
+    def _send_login_code(self, code: LoginCode, first: bool) -> None:
+        attachments = (
+            [Attachment("mobywatel-login-qr.png", code.image_png, "image/png")] if code.image_png else []
+        )
+        self._notifier.important(
+            "Login required" if first else "New login code",
+            f"Log ExamCatch in with the mObywatel app before {code.expires_at:%H:%M}:\n"
+            "- scan the QR code (attached, also shown in the ExamCatch browser window): "
+            "mObywatel > Kod QR > Zeskanuj kod QR, or\n"
+            "- on the phone: copy the code below, then in mObywatel choose Kod QR > Zeskanuj kod QR > Wpisz kod, "
+            "paste it, choose Dalej and then Udostępnij dane.\n\n"
+            f"{code.text}",
+            attachments=attachments,
+        )
+
+    def _remember_qr_response(self, response: Response) -> None:
+        # Only store it here: calling Playwright from an event handler is not allowed in the sync API.
+        if QR_CODE_API_PATH in response.url and response.ok:
+            self._qr_response = response
+
+    def _wait_for_qr_response(self) -> None:
+        deadline = time.monotonic() + QR_RESPONSE_TIMEOUT_MS / 1000
+        while self._qr_response is None and time.monotonic() < deadline:
+            self._page.wait_for_timeout(250)
+
+    def _take_login_code(self) -> LoginCode | None:
+        response, self._qr_response = self._qr_response, None
+        if response is None:
+            return None
+        try:
+            data = response.json()
+        except (PlaywrightError, ValueError):
+            return None
+        if not isinstance(data, dict) or not data.get("token"):
+            return None
+        value = data.get("value")
+        return parse_login_code(str(data["token"]), value if isinstance(value, str) else None, now())
+
     def _start_qr_login(self) -> bool:
         """Opens the login flow; returns whether the mObywatel QR code is shown (False when already logged in)."""
         page = self._page
+        self._qr_response = None
         page.goto(f"{BASE_URL}/login", wait_until="load")
         page.wait_for_timeout(PAGE_SETTLE_MS)
         if not self._on_login_page():

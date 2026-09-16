@@ -79,6 +79,8 @@ class SessionConfig:
     # Renew the portal session this long after login; None disables it. Off by default: the service requests
     # ForceAuthn="true", so every login needs a fresh QR scan and renewal only ends the session early.
     renew_after: timedelta | None = None
+    # How many login codes (QR image and text) to send per login; each is valid for 5 minutes. 0 means no limit.
+    max_login_code_notifications: int = 12
 
 
 @dataclass(frozen=True)
@@ -245,7 +247,13 @@ def _parse_session(data: dict[str, Any]) -> SessionConfig:
     default = SessionConfig().renew_after
     default_minutes = int(default.total_seconds() // 60) if default else 0
     minutes = _as_int(_get(data, "renew_after_minutes", "session", default_minutes), "session.renew_after_minutes")
-    return SessionConfig(renew_after=timedelta(minutes=minutes) if minutes > 0 else None)
+    return SessionConfig(
+        renew_after=timedelta(minutes=minutes) if minutes > 0 else None,
+        max_login_code_notifications=_as_int(
+            _get(data, "max_login_code_notifications", "session", SessionConfig().max_login_code_notifications),
+            "session.max_login_code_notifications",
+        ),
+    )
 
 
 def _parse_logging(data: dict[str, Any]) -> LoggingConfig:

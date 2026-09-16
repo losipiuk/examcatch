@@ -37,8 +37,11 @@ uv run examcatch --config config.yaml
    Without the confirmation ExamCatch keeps reminding you and, after 30 minutes, starts searching again.
 4. Afterwards it notifies you about every slot earlier than your reservation. Stop it with Ctrl+C.
 
-The service ends sessions about an hour after login. ExamCatch then logs in again by itself and notifies you once to
-scan the QR code, so someone has to scan roughly every hour; the portal asks login.gov.pl to re-authenticate every
+The service ends sessions about an hour after login. ExamCatch then logs in again by itself and sends the login code:
+the e-mail has the QR code attached and the text code in the message (in mObywatel: Kod QR > Zeskanuj kod QR >
+Wpisz kod), WhatsApp gets the text code. Codes are valid for 5 minutes; expired ones are refreshed and sent again, up
+to `session.max_login_code_notifications` per login (default 12). A successful login is confirmed by e-mail. Someone
+has to log in roughly every hour; the portal asks login.gov.pl to re-authenticate every
 time (`ForceAuthn="true"`), so no single sign-on session can spare you the scan. Renewing the session early
 (`session.renew_after_minutes`) is therefore off by default — it would only end a working session sooner.
 

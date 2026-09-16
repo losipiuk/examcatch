@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 import smtplib
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
 from typing import Protocol, TextIO
@@ -22,10 +23,17 @@ CALLMEBOT_URL = "https://api.callmebot.com/whatsapp.php"
 CALLMEBOT_SUCCESS_MARKER = "Message queued"
 
 
+@dataclass(frozen=True)
+class Attachment:
+    filename: str
+    content: bytes
+    mime_type: str
+
+
 class Channel(Protocol):
     name: str
 
-    def send(self, subject: str, message: str) -> None: ...
+    def send(self, subject: str, message: str, attachments: Sequence[Attachment] = ()) -> None: ...
 
 
 class EmailChannel:
@@ -34,13 +42,16 @@ class EmailChannel:
     def __init__(self, config: EmailConfig):
         self._config = config
 
-    def send(self, subject: str, message: str) -> None:
+    def send(self, subject: str, message: str, attachments: Sequence[Attachment] = ()) -> None:
         config = self._config
         email = EmailMessage()
         email["Subject"] = SUBJECT_PREFIX + subject
         email["From"] = config.sender
         email["To"] = ", ".join(config.recipients)
         email.set_content(message)
+        for attachment in attachments:
+            maintype, _, subtype = attachment.mime_type.partition("/")
+            email.add_attachment(attachment.content, maintype=maintype, subtype=subtype, filename=attachment.filename)
         if config.smtp_port == 465:
             smtp: smtplib.SMTP = smtplib.SMTP_SSL(config.smtp_host, config.smtp_port, timeout=SEND_TIMEOUT_SECONDS)
         else:
@@ -59,7 +70,8 @@ class CallMeBotChannel:
     def __init__(self, config: CallMeBotConfig):
         self._config = config
 
-    def send(self, subject: str, message: str) -> None:
+    def send(self, subject: str, message: str, attachments: Sequence[Attachment] = ()) -> None:
+        # CallMeBot sends text only; attachments are not delivered through this channel.
         query = urlencode({
             "phone": self._config.phone,
             "text": f"{SUBJECT_PREFIX}{subject}\n{message}",
@@ -94,12 +106,20 @@ class Notifier:
         """Less important information, shown on the screen and written to the log file only."""
         self._print(message)
 
-    def important(self, subject: str, message: str) -> None:
-        """Shown on the screen and sent through every configured channel."""
+    def important(
+        self,
+        subject: str,
+        message: str,
+        attachments: Sequence[Attachment] = (),
+        channel_names: Collection[str] | None = None,
+    ) -> None:
+        """Shown on the screen and sent through the configured channels (only `channel_names`, when given)."""
         self._print(f"*** {subject} *** {message}")
         for channel in self._channels:
+            if channel_names is not None and channel.name not in channel_names:
+                continue
             try:
-                channel.send(subject, message)
+                channel.send(subject, message, attachments)
             except Exception as e:  # a failing channel must not stop the application or the other channels
                 self._print(f"Sending {channel.name} notification failed: {e}")
 
